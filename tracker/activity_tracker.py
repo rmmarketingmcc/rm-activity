@@ -68,7 +68,11 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
-ROOT = Path(__file__).resolve().parent.parent
+# The public app's launcher checks this file's fingerprint and hands Python the checked text on stdin, so a
+# changed file never runs with the permissions macOS gave the app; then __file__ is missing and
+# RM_ACTIVITY_SCRIPT says where the file is.
+SELF = Path(globals().get("__file__") or os.environ.get("RM_ACTIVITY_SCRIPT") or "activity_tracker.py").resolve()
+ROOT = SELF.parent.parent
 # The public app (github.com/rmmarketingmcc/rm-activity) runs this same file with RM_ACTIVITY_HOME set:
 # data, settings and the page then live in that one folder, clients come from the settings file and
 # there is no calendar. Without it (RM's own Mac) everything stays in this repo.
@@ -621,7 +625,9 @@ def run() -> None:
                 if notes["titles"] != "ok" and ax_trusted_fresh():
                     log("Accessibility was just granted; restarting to pick it up")
                     con.close()
-                    os.execv(sys.executable, [sys.executable, str(Path(__file__).resolve()), "run"])
+                    if APP_HOME:  # public app: restart through the launcher (launchd), which checks the file again
+                        sys.exit(75)
+                    os.execv(sys.executable, [sys.executable, str(SELF), "run"])
                 if notes["titles"] != "ok" and (not AX_PROMPTED.exists() or now - AX_PROMPTED.stat().st_mtime > 7 * 86400):
                     AX_PROMPTED.touch()
                     ax_trusted(prompt=True)
@@ -746,7 +752,7 @@ def refresh_calendar_async() -> subprocess.Popen | None:
         if CALENDAR_PATH.exists() and time.time() - CALENDAR_PATH.stat().st_mtime < CAL_EVERY:
             return None
         with open(OUT_DIR / "tracker.log", "a") as logf:
-            return subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "calendar"], stdin=subprocess.DEVNULL,
+            return subprocess.Popen([sys.executable, str(SELF), "calendar"], stdin=subprocess.DEVNULL,
                                     stdout=logf, stderr=subprocess.STDOUT, start_new_session=True)
     except OSError as e:
         log(f"calendar refresh not started: {e}")
@@ -1391,6 +1397,8 @@ def install_widget() -> None:
         subprocess.run(["xcrun", "swiftc", "-O", "-swift-version", "5", "-o", str(app / "Contents" / "MacOS" / exe_name),
                         str(WIDGET_SRC), "-framework", "AppKit", "-framework", "WebKit"], check=True)
         shutil.copy(ROOT / "scripts" / "activity_widget.html", res / "widget.html")
+        for font in ("Poppins-Regular.ttf", "Poppins-Bold.ttf"):  # the panel's font, so it never loads from the web
+            shutil.copy(ROOT / "audits" / "themes" / "rm" / "fonts" / font, res / font)
         with open(app / "Contents" / "Info.plist", "wb") as f:
             plistlib.dump({
                 "CFBundleIdentifier": WIDGET_ID, "CFBundleName": "RM Activity", "CFBundleDisplayName": "RM Activity",
@@ -1466,7 +1474,7 @@ def install_helper(force: bool = False) -> None:
     """Build ~/Library/Application Support/RM Activity/RM Activity Tracker.app and (re)load the launchd
     job that runs it. Skips the rebuild when the launcher is unchanged: a rebuilt binary is a new app to
     macOS, so Accessibility and the Chrome permission would have to be granted again."""
-    py, script = str(ROOT / ".venv" / "bin" / "python3"), str(Path(__file__).resolve())
+    py, script = str(ROOT / ".venv" / "bin" / "python3"), str(SELF)
     stamp = hashlib.sha256((HELPER_C + py + script).encode()).hexdigest()
     stamp_file = HELPER_APP / "Contents" / "Resources" / "build.sha256"
     if force or not stamp_file.exists() or stamp_file.read_text() != stamp:

@@ -10,6 +10,10 @@ git rev-parse "v$VERSION" >/dev/null 2>&1 && { echo "v$VERSION already exists"; 
 /usr/bin/python3 tools/scan_clients.py
 echo "$VERSION" > VERSION
 ./build.sh
+# Pin the installer to this exact zip (version + fingerprint), so it installs nothing else.
+SUM=$(shasum -a 256 build/RM-Activity.zip | cut -d' ' -f1)
+sed -i '' -e "s/^VERSION=\".*\"/VERSION=\"$VERSION\"/" -e "s/^SHA256=\".*\"/SHA256=\"$SUM\"/" docs/install.sh
+grep -q "^SHA256=\"$SUM\"" docs/install.sh || { echo "could not pin the installer"; exit 1; }
 git add -A
 git commit -q -m "Release $VERSION" -m "$NOTES"
 git tag "v$VERSION"

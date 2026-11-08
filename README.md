@@ -23,6 +23,17 @@ Useful commands (inside the installed app):
 ~/Applications/RM\ Activity.app/Contents/MacOS/rm-activity-tracker status     # running? permissions?
 ```
 
+## Security
+
+- No network: the tracker and the app make no requests (fonts are bundled; Poppins, SIL Open Font License 1.1, unmodified).
+- The launcher only runs the tracker it was built with: `build.sh` compiles the script's SHA-256 into
+  `app/launcher.c`, which checks the file and hands Python the checked text on stdin (no gap between check and
+  run). A changed script stops, so no other program can borrow the Accessibility/Chrome permissions.
+- `docs/install.sh` installs one pinned release (`VERSION` + `SHA256`, set by `release.sh`) and refuses any other zip.
+- Data: `~/Library/Application Support/RM Activity` (mode 700). Query strings, incognito windows, Safari pages
+  and password managers are never recorded.
+- Not notarized (no Apple Developer ID); it installs via Terminal, without admin rights.
+
 ## Develop
 
 - `./build.sh` builds `build/RM Activity.app` (universal) and `build/RM-Activity.zip`.

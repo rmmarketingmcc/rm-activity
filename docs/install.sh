@@ -5,7 +5,10 @@
 #   curl -fsSL https://rmmarketingmcc.github.io/rm-activity/install.sh | bash -s -- --uninstall
 set -euo pipefail
 
-URL="${RM_ACTIVITY_ZIP:-https://github.com/rmmarketingmcc/rm-activity/releases/latest/download/RM-Activity.zip}"
+# release.sh pins these: this script only installs the exact zip it was released with.
+VERSION="1.0.1"
+SHA256="a7713da1e5836e9f1833fede41d4f61aeff9ab9d27cbdf9c545561f4ac717239"
+URL="${RM_ACTIVITY_ZIP:-https://github.com/rmmarketingmcc/rm-activity/releases/download/v$VERSION/RM-Activity.zip}"
 ID="dk.rmmarketing.rm-activity"
 DEST="$HOME/Applications"
 APP="$DEST/RM Activity.app"
@@ -43,9 +46,16 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 echo "Downloading RM Activity..."
 if [[ -f "$URL" ]]; then cp "$URL" "$TMP/RM-Activity.zip"; else curl -fsSL "$URL" -o "$TMP/RM-Activity.zip"; fi
+GOT="$(shasum -a 256 "$TMP/RM-Activity.zip" | cut -d' ' -f1)"
+if [[ "$GOT" != "$SHA256" ]]; then
+  echo "The download does not match RM Activity $VERSION (its fingerprint differs), so nothing was installed."
+  echo "Try again in a few minutes; if it keeps happening, tell the person who sent you the link."
+  exit 1
+fi
 
 stop_jobs
 mkdir -p "$DEST" "$DATA/data" "$AGENTS"
+chmod 700 "$DATA"   # your recorded days: readable by you only
 rm -rf "$APP"
 ditto -x -k "$TMP/RM-Activity.zip" "$DEST/"
 find "$APP" -exec xattr -d com.apple.quarantine {} + >/dev/null 2>&1 || true

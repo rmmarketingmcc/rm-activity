@@ -80,6 +80,18 @@ pre{background:var(--navy);color:#F8FAFC;border-radius:12px;padding:16px 18px;fo
   </section>
 
   <section class="part">
+    <h2>Safe to install</h2>
+    <ul class="clean">
+      <li>Open source: every line is on GitHub, and the app is built from exactly that code.</li>
+      <li>No admin password, no account, no internet: the app never sends anything anywhere, not even analytics or update checks.</li>
+      <li>The installer checks the download against its fingerprint before it installs anything.</li>
+      <li>The app only runs the exact tracking code it shipped with. If anything changes that file, it stops, so no other program can borrow the permissions you give it.</li>
+      <li>Both permissions are optional, and you can take them back any time in System Settings &gt; Privacy &amp; Security.</li>
+      <li>It is not signed by Apple (we are not a registered Apple developer), which is why it installs from Terminal instead of a download. Removing it takes one line, further down.</li>
+    </ul>
+  </section>
+
+  <section class="part">
     <h2>Your clients and categories</h2>
     <p style="color:var(--muted);margin:0">Everything is in one file: <code>~/Library/Application Support/RM Activity/settings.json</code>. Changes apply to old days too.</p>
 <pre>"clients": {
