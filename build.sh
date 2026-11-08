@@ -17,7 +17,16 @@ clang -O2 -Wall -arch arm64 -arch x86_64 -mmacosx-version-min=13.0 -DSCRIPT_SHA2
 sed "s/__VERSION__/$VERSION/g" app/Info.plist > "$APP/Contents/Info.plist"
 cp app/widget.html "$APP/Contents/Resources/widget.html"
 cp tracker/activity_tracker.py tracker/settings.example.json "$APP/Contents/Resources/"
-cp assets/logo.png assets/menubar.png assets/AppIcon.icns assets/Poppins-Regular.ttf assets/Poppins-Bold.ttf "$APP/Contents/Resources/"
+cp assets/logo.png assets/menubar.png assets/Poppins-Regular.ttf assets/Poppins-Bold.ttf "$APP/Contents/Resources/"
+# App icon from the two PNGs (sips + iconutil): the bolder one for the small sizes.
+ICONSET=build/AppIcon.iconset; mkdir -p "$ICONSET"
+for base in 16 32 128 256 512; do for scale in 1 2; do
+  px=$((base * scale)); src=assets/icon-1024.png; [[ $px -le 64 ]] && src=assets/icon-small.png
+  name="icon_${base}x${base}"; [[ $scale == 2 ]] && name="${name}@2x"
+  sips -z $px $px "$src" --out "$ICONSET/$name.png" >/dev/null
+done; done
+iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
+rm -rf "$ICONSET"
 rm -f build/app-arm64 build/app-x86_64
 find "$APP" -exec xattr -c {} + 2>/dev/null || true
 codesign --force --deep --sign - "$APP"

@@ -1409,8 +1409,9 @@ def install_widget() -> None:
             }, f)
         try:
             sys.path.insert(0, str(ROOT / "scripts"))
-            from automation_health import _logo_png, write_icns
-            write_icns(res / "AppIcon.icns")
+            from automation_health import _logo_png
+            from activity_icon import icns
+            icns(res / "AppIcon.icns")                          # the activity ring (scripts/activity_icon.py)
             (res / "logo.png").write_bytes(_logo_png(96))      # panel header
             (res / "menubar.png").write_bytes(_logo_png(64))   # template image: macOS colours it for the menu bar
         except Exception as e:  # cosmetic: the app falls back to a timer symbol and no header logo

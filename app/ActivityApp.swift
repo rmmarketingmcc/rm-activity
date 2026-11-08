@@ -10,6 +10,7 @@ import WebKit
 
 let navy = NSColor(srgbRed: 25 / 255, green: 34 / 255, blue: 48 / 255, alpha: 1)
 let repoURL = URL(string: "https://github.com/rmmarketingmcc/rm-activity")!
+let websiteURL = URL(string: "https://rmmarketingmcc.github.io/rm-activity/")!
 let issuesURL = URL(string: "https://github.com/rmmarketingmcc/rm-activity/issues/new")!
 let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
 
@@ -214,6 +215,7 @@ final class ActivityApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     func mainMenu() -> NSMenu {
         let bar = NSMenu()
         let app = NSMenu()
+        app.addItem(entry("RM Activity website", #selector(openWebsite)))
         app.addItem(entry("Code on GitHub", #selector(openGitHub)))
         app.addItem(entry("Report a problem...", #selector(reportProblem)))
         app.addItem(.separator())
@@ -256,6 +258,7 @@ final class ActivityApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         menu.addItem(entry("Keep on top", #selector(toggleTop), on: level == "top"))
         menu.addItem(entry("Pin to the desktop", #selector(toggleDesktop), on: level == "desktop"))
         menu.addItem(.separator())
+        menu.addItem(entry("RM Activity website", #selector(openWebsite)))
         menu.addItem(entry("Code on GitHub", #selector(openGitHub)))
         menu.addItem(entry("Report a problem...", #selector(reportProblem)))
         let about = entry("RM Activity \(appVersion), made by RM Marketing", nil)
@@ -267,6 +270,7 @@ final class ActivityApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     @objc func openPage() { NSWorkspace.shared.open(pageURL) }
     @objc func openGitHub() { NSWorkspace.shared.open(repoURL) }
+    @objc func openWebsite() { NSWorkspace.shared.open(websiteURL) }
     @objc func quitApp() { NSApp.terminate(nil) }
 
     /// A GitHub issue with the technical facts filled in. Issues are public: never names, sites or clients.
@@ -287,6 +291,10 @@ final class ActivityApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             openPage()
         case "github":
             openGitHub()
+        case "website":
+            openWebsite()
+        case "report":
+            reportProblem()
         case "size":  // the window follows the panel's height, keeping its top edge where it is
             let h = min(max(CGFloat(body["h"] as? Double ?? 560), 180), 900)
             let content = window.contentRect(forFrameRect: window.frame)

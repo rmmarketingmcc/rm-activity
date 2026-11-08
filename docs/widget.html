@@ -1,7 +1,7 @@
 <!doctype html>
 <!-- RM Activity: the panel in the app's window (activity_widget.swift), which can also float on top or sit on the desktop.
      The app calls window.render(data) with widget.json (written by activity_tracker.py every 30 s) and listens for
-     {action: 'open' | 'github' | 'size'} on window.webkit.messageHandlers.rm. RM brand: navy ground, Cloud White text,
+     {action: 'open' | 'report' | 'website' | 'github' | 'size'} on window.webkit.messageHandlers.rm. RM brand: navy ground, Cloud White text,
      lime as the one accent (never white text on lime), Poppins. -->
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>RM Activity</title>
@@ -74,9 +74,12 @@ body.panel .wrap{padding-top:22px}
 .foot{display:flex;gap:8px;margin-top:14px}
 .foot button{flex:1;border:0;background:var(--lime);color:var(--navy);border-radius:8px;height:30px;font:inherit;font-size:12px;font-weight:600;cursor:pointer}
 .foot button:hover{filter:brightness(1.06)}
+.foot button.ghost{flex:0 0 auto;padding:0 12px;background:transparent;color:var(--ink);border:1px solid var(--line);font-weight:500}
+.foot button.ghost:hover{border-color:var(--lime);filter:none}
 .warn{margin-top:10px;font-size:11px;color:var(--call)}
 .gh{margin-top:8px;text-align:center;font-size:11px;color:var(--faint)}
 .gh a{color:var(--muted);text-underline-offset:2px;cursor:pointer}
+.gh a:hover{color:var(--lime)}
 </style></head>
 <body><div class="wrap" id="app"><div class="empty">Waiting for RM Activity&hellip;</div></div>
 <script>
@@ -185,13 +188,18 @@ function draw() {
       <div class="wk"><div class="k">In meetings</div><div class="mid">${dur(D.meetings_cat != null ? d.cats[D.meetings_cat] : 0)}</div><div class="sub">${d.total ? Math.round((D.meetings_cat != null ? d.cats[D.meetings_cat] : 0) / d.total * 100) : 0}% of today</div></div></div>
     ${nowCard()}${catBar()}${strip()}${meetings()}${clients()}${week()}
     ${D.age_warning ? `<div class="warn">${esc(D.age_warning)}</div>` : ''}
-    <div class="foot"><button id="open">Open full page</button></div>
-    <div class="gh"><a id="gh">Code on GitHub</a> &middot; made by RM Marketing</div>`;
-  document.getElementById('open').onclick = () => post({action: 'open'});
-  document.getElementById('gh').onclick = () => {
-    try { window.webkit.messageHandlers.rm.postMessage({action: 'github'}); }
-    catch (e) { window.open('https://github.com/rmmarketingmcc/rm-activity', '_blank'); }  // the demo on the website
+    <div class="foot"><button id="open">Open full page</button><button class="ghost" id="report">Report a problem</button></div>
+    <div class="gh"><a data-go="website">RM Activity website</a> &middot; <a data-go="github">Code on GitHub</a> &middot; made by RM Marketing</div>`;
+  // In the app these go to Swift; in the demo on the website they open in a new tab.
+  const WEB = {open: null, report: 'https://github.com/rmmarketingmcc/rm-activity/issues/new',
+               website: 'https://rmmarketingmcc.github.io/rm-activity/', github: 'https://github.com/rmmarketingmcc/rm-activity'};
+  const go = action => {
+    try { window.webkit.messageHandlers.rm.postMessage({action}); }
+    catch (e) { if (WEB[action]) window.open(WEB[action], '_blank'); }
   };
+  document.getElementById('open').onclick = () => go('open');
+  document.getElementById('report').onclick = () => go('report');
+  for (const a of document.querySelectorAll('[data-go]')) a.onclick = () => go(a.dataset.go);
   tick();
   post({action: 'size', h: Math.ceil(document.getElementById('app').getBoundingClientRect().height)});
 }

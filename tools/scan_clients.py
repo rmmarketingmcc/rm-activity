@@ -11,7 +11,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 RM = Path.home() / "google-ads-mcp"
 GENERIC = {"google", "design", "digital", "online", "marketing", "studio", "group", "shine", "nspire", "consulting",
-           "lead", "leads", "audit", "partner", "home", "media", "contact"}
+           "lead", "leads", "audit", "partner", "home", "media", "contact", "ghost", "lost"}
 MAIL_PROVIDERS = {"gmail.com", "googlemail.com", "hotmail.com", "hotmail.dk", "outlook.com", "outlook.dk", "live.com", "live.dk",
                   "icloud.com", "me.com", "yahoo.com", "yahoo.dk", "mail.dk", "jubii.dk", "protonmail.com"}
 
