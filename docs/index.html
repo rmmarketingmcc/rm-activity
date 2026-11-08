@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RM Activity</title>
+<meta name="description" content="A free Mac app that shows where your day goes: apps, sites, meetings and clients. Everything stays on your Mac.">
+<link rel="icon" href="icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--navy:#192230;--navy2:#232F44;--ground:#F8FAFC;--card:#fff;--ink:#192230;--muted:#3E4B63;--faint:#55637E;--line:#D9E0EA;--lime:#84CE18;--green:#4d7d0d}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--ground);color:var(--ink);font:16px/1.65 Poppins,-apple-system,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:var(--green);text-underline-offset:3px}
+.bar{background:var(--navy);color:#fff}
+.bar .in{max-width:1080px;margin:0 auto;padding:14px 24px;display:flex;align-items:center;gap:10px}
+.bar img{height:26px}
+.bar .nm{font-weight:600}
+.bar a{margin-left:auto;color:#fff;font-size:14px;text-decoration:none;border:1px solid rgba(255,255,255,.25);border-radius:8px;padding:6px 12px}
+.bar a:hover{border-color:var(--lime)}
+.wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+.hero{display:grid;grid-template-columns:1fr 360px;gap:56px;align-items:start;padding:64px 0 40px}
+h1{font-size:46px;line-height:1.1;margin:0 0 18px;letter-spacing:-.8px}
+.lead{font-size:18px;color:var(--muted);margin:0 0 28px;max-width:540px}
+.install{background:var(--navy);color:#F8FAFC;border-radius:14px;padding:16px 18px;display:flex;gap:12px;align-items:center;max-width:560px}
+.install code{flex:1;font:13.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;overflow-x:auto;white-space:nowrap}
+.install button{border:0;background:var(--lime);color:var(--navy);font:inherit;font-size:14px;font-weight:600;border-radius:8px;padding:8px 14px;cursor:pointer;flex:none}
+.small{font-size:14px;color:var(--faint);margin:12px 0 0}
+.demo{background:var(--navy);border-radius:18px;padding:0;box-shadow:0 24px 60px rgba(25,34,48,.28);overflow:hidden}
+.demo iframe{display:block;width:340px;height:760px;border:0;margin:0 auto}
+.demo-note{font-size:13px;color:var(--faint);text-align:center;margin:10px 0 0}
+section.part{padding:44px 0;border-top:1px solid var(--line)}
+h2{font-size:28px;margin:0 0 18px;letter-spacing:-.3px}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:22px 40px}
+.grid h3{font-size:17px;margin:0 0 4px}
+.grid p{margin:0;color:var(--muted)}
+ul.clean{margin:0;padding:0;list-style:none}
+ul.clean li{padding:6px 0 6px 26px;position:relative;color:var(--muted)}
+ul.clean li::before{content:"";position:absolute;left:4px;top:15px;width:10px;height:10px;border-radius:50%;background:var(--lime)}
+ul.never li::before{background:none;border:2px solid var(--faint);width:8px;height:8px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:40px}
+pre{background:var(--navy);color:#F8FAFC;border-radius:12px;padding:16px 18px;font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;overflow-x:auto;margin:12px 0 0}
+.foot{padding:36px 0 60px;color:var(--faint);font-size:14px;border-top:1px solid var(--line)}
+@media (max-width:900px){.hero{grid-template-columns:1fr;gap:36px;padding-top:40px}h1{font-size:34px}.demo iframe{width:100%;max-width:340px}
+.grid,.two{grid-template-columns:1fr}.wrap,.bar .in{padding-left:16px;padding-right:16px}}
+</style></head>
+<body>
+<header class="bar"><div class="in"><img src="logo.png" alt=""><span class="nm">RM Activity</span><a href="https://github.com/rmmarketingmcc/rm-activity">Code on GitHub</a></div></header>
+<main class="wrap">
+  <section class="hero">
+    <div>
+      <h1>See where your day actually goes</h1>
+      <p class="lead">RM Activity is a free Mac app that notes which app, web page and window you work in, every five seconds, and turns it into your day: time per category, per client, in meetings, and the week. Everything stays on your Mac.</p>
+      <div class="install"><code id="cmd">curl -fsSL https://rmmarketingmcc.github.io/rm-activity/install.sh | bash</code><button id="copy">Copy</button></div>
+      <p class="small">Paste it in Terminal. macOS 13 or newer, Apple silicon or Intel. Needs Apple's Command Line Tools; the installer tells you if they are missing. Run the same line again to update.</p>
+    </div>
+    <div>
+      <div class="demo"><iframe id="demo" src="widget.html" title="RM Activity panel, live demo"></iframe></div>
+      <p class="demo-note">A live demo with made-up clients. On your Mac it sits in the menu bar.</p>
+    </div>
+  </section>
+
+  <section class="part">
+    <h2>What you get</h2>
+    <div class="grid">
+      <div><h3>Today in the menu bar</h3><p>Your active time next to the RM mark. Click it, or open the app, for the whole day: what you are on right now, a timeline, and the week.</p></div>
+      <div><h3>Real meeting time</h3><p>A call counts from the microphone: Meet, Zoom, Teams, Slack, WhatsApp or a phone call through the Mac, whatever window is in front, also while you only listen. Dictation never counts.</p></div>
+      <div><h3>Time per client</h3><p>Add your clients to the settings file. A stretch belongs to a client when their name or domain shows up in the page, the address or the window title.</p></div>
+      <div><h3>A full page and a widget</h3><p>Day and week view with sites, pages, apps and a log. Put the panel on your desktop or keep it floating on top.</p></div>
+    </div>
+  </section>
+
+  <section class="part">
+    <h2>Private by design</h2>
+    <div class="two">
+      <div><h3>It notes</h3>
+        <ul class="clean"><li>The app in front, every 5 seconds</li><li>Chrome: the site, the path and the tab title (never the part after ? or #)</li><li>Other apps: the window title, if you allow Accessibility</li><li>Which app uses the microphone, never the sound</li></ul></div>
+      <div><h3>It never</h3>
+        <ul class="clean never"><li>Looks at incognito windows</li><li>Reads Safari pages (app time only)</li><li>Counts time away: 3 minutes without keyboard or mouse stops the clock</li><li>Sends anything anywhere. No account, no cloud, no tracking of you</li></ul></div>
+    </div>
+  </section>
+
+  <section class="part">
+    <h2>Your clients and categories</h2>
+    <p style="color:var(--muted);margin:0">Everything is in one file: <code>~/Library/Application Support/RM Activity/settings.json</code>. Changes apply to old days too.</p>
+<pre>"clients": {
+  "list": [
+    {"name": "Acme Dental", "aliases": ["acme"], "domains": ["acmedental.com"]},
+    {"name": "Northwind Plumbing", "domains": ["northwind.co"]}
+  ]
+}</pre>
+  </section>
+
+  <section class="part">
+    <h2>Make it your own</h2>
+    <p style="color:var(--muted);margin:0 0 6px">Open source under the MIT license: a small Swift app and one Python file. Change the categories, the panel, or what it counts. Remove it again with:</p>
+<pre>curl -fsSL https://rmmarketingmcc.github.io/rm-activity/install.sh | bash -s -- --uninstall</pre>
+  </section>
+  <p class="foot">Made by <a href="https://rmmarketing.dk">RM Marketing</a>, for our own days first.</p>
+</main>
+<script>
+document.getElementById('copy').onclick = async e => {
+  try { await navigator.clipboard.writeText(document.getElementById('cmd').textContent); e.target.textContent = 'Copied'; }
+  catch (_) { e.target.textContent = 'Select and copy'; }
+  setTimeout(() => { e.target.textContent = 'Copy'; }, 2000);
+};
+// Live demo: the real panel (widget.html) with a made-up day, pretending it is 15:36 local time.
+const frame = document.getElementById('demo');
+frame.addEventListener('load', () => {
+  const w = frame.contentWindow;
+  const real0 = Date.now(), mid = new Date(); mid.setHours(0, 0, 0, 0);
+  mid.setDate(mid.getDate() - ((mid.getDay() + 6) % 7) + 3);  // the demo day is this week's Thursday
+  const t0 = mid.getTime() / 1000, fake0 = (t0 + 15.6 * 3600) * 1000;
+  const fakeNow = () => fake0 + (Date.now() - real0);
+  w.Date.now = fakeNow;
+  const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const h = x => t0 + x * 3600;
+  const isoWeek = d => { const x = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())); const n = x.getUTCDay() || 7;
+    x.setUTCDate(x.getUTCDate() + 4 - n); const y0 = new Date(Date.UTC(x.getUTCFullYear(), 0, 1));
+    return `${x.getUTCFullYear()}-W${String(Math.ceil(((x - y0) / 864e5 + 1) / 7)).padStart(2, '0')}`; };
+  const cats = ['Ads and analytics', 'Email and chat', 'Meetings', 'Code and AI', 'Sales', 'Docs and admin', 'Social and video', 'News'];
+  const blocks = [[8.5, 9.2, 1], [9.2, 10.4, 3], [10.4, 11.1, 2], [11.1, 12, 0], [13, 13.6, 1], [13.6, 14.5, 3], [14.5, 15.1, 2], [15.1, 15.6, 3]]
+    .map(([a, b, c]) => [a * 3600, b * 3600, c]);
+  const wd = (mid.getDay() + 6) % 7, week = [27000, 25200, 29880, 26400, 24800, 0, 0];
+  const days = Array.from({length: 7}, (_, i) => { const x = new Date(mid); x.setDate(mid.getDate() - wd + i);
+    return [iso(x), i < wd ? week[i] : i === wd ? 22320 : null]; });
+  const show = () => {
+    const now = fakeNow() / 1000;
+    w.render({
+      generated: now - 4, today: iso(mid), t0, categories: cats, meetings_cat: 2, state: 'active', in_call: false, menubar: '6h 12m',
+      now: {label: 'github.com', title: 'Pull request: new landing page', app: 'Google Chrome', cat: 3, client: 'Acme Dental', call: '',
+            since: fake0 / 1000 - 1260, until: now - 2},
+      day: {total: 22320, first: h(8.5), cats: [3200, 4300, 5400, 7900, 900, 620, 0, 0, 0], blocks,
+        clients: [['Acme Dental', 5120], ['Northwind Plumbing', 3010], ['Blue Fern Café', 1460]], no_client: 12730,
+        meetings: [[h(10.4), h(11.1), 'Monthly review with Acme Dental', 'Acme Dental', 2520, 2460, 'booked'],
+                   [h(14.5), h(15.1), 'Intro call: Northwind Plumbing', 'Northwind Plumbing', 2100, 2040, 'booked'],
+                   [h(16.5), h(17), 'Team sync', 'Team', 1800, 0, 'upcoming']]},
+      meeting_now: null, next_meeting: {title: 'Team sync', s: h(16.5), e: h(17), client: 'Team'},
+      week: {key: isoWeek(mid), total: days.reduce((p, d) => p + (d[1] || 0), 0), meet: 30600, client_pct: 44, days},
+    });
+  };
+  const fit = () => { const app = w.document.getElementById('app'); if (app) frame.style.height = Math.ceil(app.getBoundingClientRect().height) + 'px'; };
+  show(); fit();
+  setInterval(() => { show(); fit(); }, 60000);
+});
+</script>
+</body></html>

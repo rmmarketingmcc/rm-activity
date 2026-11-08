@@ -1,0 +1,271 @@
+{
+ "_about": "Categories for RM Activity (RM Activity page). First match wins, top to bottom. 'hosts' match a site and all its subdomains (linkedin.com also matches www.linkedin.com); 'apps' match the app name as macOS shows it, or its bundle id (use the bundle id when the name is localized or carries invisible characters, e.g. WhatsApp, System Settings). Categories are applied when the page is built, so an edit here also re-sorts old days. Max 8 categories (one chart color each); anything unmatched is Other. 'no_input_ok' = apps/sites where sitting still is normal (meetings, video): they count as active for up to 'minutes' without keyboard or mouse instead of the usual 3. 'never_read_titles' = apps whose window title is never read (browsers are always skipped in code).",
+ "categories": [
+  {
+   "name": "Google Ads & data",
+   "hosts": [
+    "ads.google.com",
+    "analytics.google.com",
+    "tagmanager.google.com",
+    "search.google.com",
+    "merchants.google.com",
+    "business.google.com",
+    "lookerstudio.google.com",
+    "datastudio.google.com",
+    "adstransparency.google.com",
+    "support.google.com",
+    "ads.microsoft.com",
+    "whatconverts.com",
+    "profitmetrics.io",
+    "pagespeed.web.dev"
+   ],
+   "apps": [
+    "Google Ads Editor"
+   ]
+  },
+  {
+   "name": "Email & chat",
+   "hosts": [
+    "mail.google.com",
+    "outlook.office.com",
+    "outlook.office365.com",
+    "outlook.live.com",
+    "outlook.cloud.microsoft",
+    "app.slack.com",
+    "web.whatsapp.com",
+    "messenger.com",
+    "web.telegram.org"
+   ],
+   "apps": [
+    "Slack",
+    "Mail",
+    "Microsoft Outlook",
+    "WhatsApp",
+    "net.whatsapp.WhatsApp",
+    "Messages",
+    "Telegram",
+    "Signal"
+   ]
+  },
+  {
+   "name": "Meetings",
+   "hosts": [
+    "meet.google.com",
+    "zoom.us",
+    "teams.microsoft.com",
+    "teams.live.com",
+    "whereby.com",
+    "meetgeek.ai"
+   ],
+   "apps": [
+    "zoom.us",
+    "Microsoft Teams",
+    "FaceTime",
+    "MeetGeek",
+    "ai.meetgeek.prod"
+   ]
+  },
+  {
+   "name": "AI & code",
+   "hosts": [
+    "claude.ai",
+    "claude.com",
+    "console.anthropic.com",
+    "chatgpt.com",
+    "gemini.google.com",
+    "github.com",
+    "supabase.com",
+    "console.cloud.google.com",
+    "chromewebstore.google.com",
+    "localhost",
+    "127.0.0.1",
+    "local file"
+   ],
+   "apps": [
+    "Code",
+    "Visual Studio Code",
+    "Cursor",
+    "Claude",
+    "Terminal",
+    "iTerm2",
+    "Ghostty",
+    "Warp",
+    "Wispr Flow"
+   ]
+  },
+  {
+   "name": "LinkedIn & sales",
+   "hosts": [
+    "linkedin.com",
+    "calendly.com"
+   ],
+   "apps": []
+  },
+  {
+   "name": "Docs & admin",
+   "hosts": [
+    "docs.google.com",
+    "drive.google.com",
+    "calendar.google.com",
+    "accounts.google.com",
+    "admin.google.com",
+    "payments.google.com",
+    "apps.google.com",
+    "bookings.cloud.microsoft",
+    "app.productive.io",
+    "productive.io",
+    "xero.com",
+    "loom.com",
+    "notion.so",
+    "mitid.dk",
+    "skat.dk",
+    "virk.dk",
+    "chrome:settings",
+    "chrome:extensions",
+    "chrome:downloads",
+    "chrome:history"
+   ],
+   "apps": [
+    "Finder",
+    "Preview",
+    "com.apple.Preview",
+    "Calendar",
+    "com.apple.iCal",
+    "Notes",
+    "com.apple.Notes",
+    "Numbers",
+    "Pages",
+    "Keynote",
+    "Microsoft Word",
+    "Microsoft Excel",
+    "Notion",
+    "com.apple.systempreferences",
+    "com.apple.LocalAuthentication.UIAgent"
+   ]
+  },
+  {
+   "name": "Social, video & games",
+   "hosts": [
+    "youtube.com",
+    "facebook.com",
+    "instagram.com",
+    "reddit.com",
+    "x.com",
+    "twitter.com",
+    "tiktok.com",
+    "netflix.com",
+    "vimeo.com",
+    "twitch.tv",
+    "blizzard.com"
+   ],
+   "apps": [
+    "Spotify",
+    "Music",
+    "TV",
+    "Netflix",
+    "QuickTime Player",
+    "VLC",
+    "League of Legends",
+    "League Of Legends",
+    "com.riotgames.LeagueofLegends.GameClient",
+    "com.riotgames.LeagueofLegends.LeagueClientUx"
+   ]
+  },
+  {
+   "name": "News",
+   "hosts": [
+    "dr.dk",
+    "tv2.dk",
+    "bt.dk",
+    "ekstrabladet.dk",
+    "politiken.dk",
+    "berlingske.dk",
+    "jyllands-posten.dk",
+    "borsen.dk",
+    "bbc.com",
+    "bbc.co.uk",
+    "cnn.com",
+    "theguardian.com",
+    "nytimes.com",
+    "news.ycombinator.com"
+   ],
+   "apps": [
+    "News"
+   ]
+  }
+ ],
+ "never_read_titles": [
+  "1Password",
+  "1Password 7",
+  "Bitwarden",
+  "Dashlane",
+  "Keychain Access",
+  "Passwords"
+ ],
+ "no_input_ok": {
+  "minutes": 90,
+  "hosts": [
+   "meet.google.com",
+   "zoom.us",
+   "teams.microsoft.com",
+   "teams.live.com",
+   "whereby.com",
+   "youtube.com",
+   "loom.com",
+   "vimeo.com",
+   "netflix.com"
+  ],
+  "apps": [
+   "zoom.us",
+   "Microsoft Teams",
+   "FaceTime",
+   "QuickTime Player",
+   "VLC",
+   "TV",
+   "Netflix"
+  ]
+ },
+ "calls": {
+  "_about": "A call = an app recording from the microphone (CoreAudio, checked every 5 s; the audio itself is never touched). While on a call the time counts as Meetings whatever window is in front, and as active for up to no_input_ok.minutes without keyboard or mouse. Only known call apps count (CALL_APPS in activity_tracker.py: Zoom, WhatsApp, FaceTime, phone, Teams, Slack, ...), and a browser only while a meeting tab (Meet, Zoom, Teams, Slack, WhatsApp Web) is open, so dictation (Wispr Flow) and voice input on a web page are never meetings. not_a_call = mic users that never count even so, matched on bundle id or its prefix; any other mic user is logged once in tracker.log.",
+  "not_a_call": [
+   "com.electron.wispr-flow",
+   "com.superduper.superwhisper",
+   "com.apple.SpeechRecognitionCore",
+   "com.apple.assistantd",
+   "com.apple.corespeechd",
+   "com.apple.Siri",
+   "com.apple.VoiceMemos",
+   "com.loom.desktop",
+   "com.apple.QuickTimePlayerX",
+   "com.apple.screencaptureui",
+   "com.apple.Photo-Booth",
+   "com.obsproject.obs-studio"
+  ],
+  "booked_meeting_evidence_minutes": 2
+ },
+ "clients": {
+  "_about": "Time per client. A booked meeting has no calendar here; a stretch belongs to a client when its name, an alias or a domain shows up in the page title, the web address or the window title (a Claude Code session name counts too). Add one entry per client to list. alias_stoplist = words never used as an alias.",
+  "list": [
+   {
+    "name": "Example Client",
+    "aliases": [
+     "example client"
+    ],
+    "domains": [
+     "example.com"
+    ],
+    "emails": []
+   }
+  ],
+  "alias_stoplist": [
+   "google",
+   "google ads",
+   "lead",
+   "home"
+  ],
+  "alias_stopwords": [
+   "lead",
+   "leads"
+  ]
+ }
+}

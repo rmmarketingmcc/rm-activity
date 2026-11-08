@@ -1,0 +1,201 @@
+<!doctype html>
+<!-- RM Activity: the panel in the menu bar popover, the app window and the desktop widget (activity_widget.swift).
+     The app calls window.render(data) with widget.json (written by activity_tracker.py every 30 s) and listens for
+     {action: 'open' | 'size'} on window.webkit.messageHandlers.rm. RM brand: navy ground, Cloud White text,
+     lime as the one accent (never white text on lime), Poppins. -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RM Activity</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--navy:#192230;--navy2:#232F44;--ink:#F8FAFC;--muted:#C2CBD9;--faint:#8D99AE;--line:rgba(248,250,252,.10);--track:rgba(248,250,252,.08);
+--chip:rgba(248,250,252,.06);--lime:#84CE18;--call:#ff6b6b;
+--c0:#3987e5;--c1:#d95926;--c2:#199e70;--c3:#c98500;--c4:#d55181;--c5:#2e9b2e;--c6:#9085e9;--c7:#e66767;--cx:#6b6a65}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--navy);color:var(--ink);font:12.5px/1.45 Poppins,-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+-webkit-font-smoothing:antialiased;-webkit-user-select:none;user-select:none;cursor:default;overflow:hidden}
+.wrap{padding:14px 16px 14px}
+body.panel .wrap{padding-top:22px}
+.empty{color:var(--faint);padding:30px 0;text-align:center}
+.brand{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.brand img{height:20px;width:auto}
+.brand .nm{font-weight:600;font-size:13px;letter-spacing:.1px}
+.brand .dt{margin-left:auto;color:var(--faint);font-size:11.5px}
+.k{color:var(--faint);font-size:11px}
+.top{display:flex;justify-content:space-between;align-items:flex-end;gap:10px}
+.big{font-size:34px;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums;letter-spacing:-.6px}
+.mid{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums}
+.sub{color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
+.wk{text-align:right}
+.now{margin-top:12px;padding:9px 11px;border-radius:10px;background:var(--navy2);border:1px solid var(--line);display:grid;grid-template-columns:10px 1fr auto;gap:2px 9px;align-items:center}
+.now .dot{width:9px;height:9px;border-radius:50%}
+.now .what{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.now .t{font-variant-numeric:tabular-nums;font-weight:600;color:var(--lime)}
+.now .more{grid-column:2/4;color:var(--muted);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.now.call{background:rgba(255,107,107,.14);border-color:rgba(255,107,107,.35)}
+.now.call .t{color:var(--ink)}
+.now.call .dot{background:var(--call);animation:pulse 1.6s ease-in-out infinite}
+.now.idle .what{color:var(--muted);font-weight:500}
+.now.idle .t{color:var(--muted)}
+@keyframes pulse{50%{opacity:.35}}
+.bar{display:flex;height:8px;border-radius:4px;overflow:hidden;margin-top:12px;background:var(--track);gap:1px}
+.legend{display:flex;flex-wrap:wrap;gap:2px 12px;margin-top:6px;font-size:11px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+.sw{width:8px;height:8px;border-radius:2px;display:inline-block}
+.strip{position:relative;height:14px;margin-top:10px;background:var(--track);border-radius:4px;overflow:hidden}
+.strip i{position:absolute;top:0;bottom:0;border-radius:2px}
+.strip .nowline{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--lime)}
+.axis{display:flex;justify-content:space-between;font-size:10.5px;color:var(--faint);margin-top:2px;font-variant-numeric:tabular-nums}
+.sec{margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}
+.h{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
+.h b{font-size:12px;font-weight:600}
+.h span{color:var(--faint);font-size:11px;font-variant-numeric:tabular-nums}
+.next{font-size:11.5px;color:var(--muted);margin-bottom:6px}
+.next b{color:var(--ink);font-weight:600}
+.mt{display:grid;grid-template-columns:38px 1fr auto;gap:8px;font-size:11.5px;padding:2px 0;align-items:baseline}
+.mt .tm{color:var(--faint);font-variant-numeric:tabular-nums}
+.mt .tt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mt .st{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.mt.future .tt,.mt.future .st{color:var(--faint)}
+.cl{display:grid;grid-template-columns:minmax(0,1fr) 70px 48px;gap:8px;align-items:center;font-size:11.5px;padding:2px 0}
+.cl .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cl .trk{height:6px;background:var(--track);border-radius:3px}
+.cl .trk i{display:block;height:100%;border-radius:3px;background:var(--lime)}
+.cl .v{text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)}
+.none{font-size:11px;color:var(--faint);margin-top:3px}
+.week{display:flex;gap:6px;align-items:flex-end;height:64px}
+.wd{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;height:100%;justify-content:flex-end}
+.wd .col{width:100%;max-width:26px;border-radius:4px 4px 2px 2px;background:var(--muted);opacity:.45;min-height:2px}
+.wd.today .col{background:var(--lime);opacity:1}
+.wd.future .col{background:var(--track);opacity:1}
+.wd .l{font-size:10.5px;color:var(--faint)}
+.wd.today .l{color:var(--ink);font-weight:600}
+.foot{display:flex;gap:8px;margin-top:14px}
+.foot button{flex:1;border:0;background:var(--lime);color:var(--navy);border-radius:8px;height:30px;font:inherit;font-size:12px;font-weight:600;cursor:pointer}
+.foot button:hover{filter:brightness(1.06)}
+.warn{margin-top:10px;font-size:11px;color:var(--call)}
+</style></head>
+<body><div class="wrap" id="app"><div class="empty">Waiting for RM Activity&hellip;</div></div>
+<script>
+let D = null;
+const pad = n => String(n).padStart(2, '0');
+const DKF = new Intl.DateTimeFormat('en-GB', {timeZone: 'Europe/Copenhagen', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'});
+const hm = ts => { const d = new Date(ts * 1000); return pad(d.getHours()) + ':' + pad(d.getMinutes()); };
+const dk = ts => DKF.format(new Date(ts * 1000));
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+const nowS = () => Date.now() / 1000;
+function dur(sec) {
+  sec = Math.round(sec);
+  if (sec <= 0) return '0m';
+  if (sec < 60) return sec + 's';
+  const m = Math.round(sec / 60); if (m < 60) return m + 'm';
+  const h = Math.floor(m / 60), r = m % 60; return r ? `${h}h ${r}m` : `${h}h`;
+}
+function clock(sec) {
+  sec = Math.max(0, Math.floor(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
+  return h ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+}
+const color = i => i < D.categories.length ? `var(--c${i})` : 'var(--cx)';
+const catName = i => i < D.categories.length ? D.categories[i] : 'Other';
+const post = msg => { try { window.webkit.messageHandlers.rm.postMessage(msg); } catch (e) {} };
+// Time since the data was written counts while the tracker is active (the file is at most 30 s old).
+const extra = () => D.state === 'active' ? Math.max(0, Math.min(90, nowS() - D.generated)) : 0;
+
+window.render = data => { D = data; draw(); };
+
+function nowCard() {
+  const c = D.now;
+  if (D.state === 'stopped') return `<div class="now idle"><span class="dot" style="background:var(--cx)"></span><span class="what">Tracker is not running</span><span></span>
+    <span class="more">Run: python3 scripts/activity_tracker.py status</span></div>`;
+  if (!c) return `<div class="now idle"><span class="dot" style="background:var(--cx)"></span><span class="what">Nothing yet today</span><span></span></div>`;
+  if (D.state !== 'active') return `<div class="now idle"><span class="dot" style="background:var(--cx)"></span><span class="what">Away since ${hm(c.until)}</span>
+    <span class="t" id="nowt"></span><span class="more">Last: ${esc(c.label)}${c.title ? ' - ' + esc(c.title) : ''}</span></div>`;
+  const call = c.call ? `On a call (${esc(c.call)})` : '';
+  const more = [call ? esc(c.label) + (c.title ? ' - ' + esc(c.title) : '') : esc(c.title), c.client ? esc(c.client) : ''].filter(Boolean).join(' &middot; ');
+  return `<div class="now${c.call ? ' call' : ''}"><span class="dot" style="background:${color(c.cat)}"></span>
+    <span class="what">${call || esc(c.label)}</span><span class="t" id="nowt"></span>${more ? `<span class="more">${more}</span>` : ''}</div>`;
+}
+
+function catBar() {
+  const d = D.day, idx = d.cats.map((v, i) => i).filter(i => d.cats[i] >= 30).sort((a, b) => d.cats[b] - d.cats[a]);
+  if (!d.total) return '';
+  const segs = idx.map(i => `<i style="flex:${d.cats[i]};background:${color(i)}" title="${esc(catName(i))} ${dur(d.cats[i])}"></i>`).join('');
+  const leg = idx.slice(0, 4).map(i => `<span><span class="sw" style="background:${color(i)}"></span>${esc(catName(i))} ${dur(d.cats[i])}</span>`).join('');
+  return `<div class="bar">${segs}</div><div class="legend">${leg}</div>`;
+}
+
+function strip() {
+  const d = D.day; if (!d.total) return '';
+  const start = Math.floor((d.first - D.t0) / 3600) * 3600, end = Math.max(start + 3600, Math.ceil((nowS() - D.t0) / 3600) * 3600);
+  const x = s => ((s - start) / (end - start) * 100).toFixed(2);
+  const blocks = d.blocks.map(([s, e, c]) => `<i style="left:${x(s)}%;width:max(1px,${(x(e) - x(s)).toFixed(2)}%);background:${color(c)}"></i>`).join('');
+  const nl = `<span class="nowline" style="left:${x(nowS() - D.t0)}%"></span>`;
+  const t = s => { const h = Math.floor(s / 3600) % 24; return pad(h) + ':00'; };
+  return `<div class="strip">${blocks}${nl}</div><div class="axis"><span>${t(start)}</span><span>${t(start + (end - start) / 2)}</span><span>${t(end)}</span></div>`;
+}
+
+function meetings() {
+  const d = D.day, ms = d.meetings, meet = D.meetings_cat != null ? d.cats[D.meetings_cat] : 0;
+  let next = '';
+  if (D.meeting_now) next = `<div class="next">Now: <b>${esc(D.meeting_now.title)}</b>, until ${hm(D.meeting_now.e)} (DK ${dk(D.meeting_now.e)})</div>`;
+  else if (D.next_meeting) {
+    const m = D.next_meeting, inS = m.s - nowS();
+    next = `<div class="next">Next: <b>${esc(m.title)}</b>, ${hm(m.s)} (DK ${dk(m.s)}), in ${dur(inS)}${m.client ? ' &middot; ' + esc(m.client) : ''}</div>`;
+  }
+  if (!ms.length && !next && !meet) return '';
+  const rows = ms.filter(m => m[0] !== (D.next_meeting && D.next_meeting.s)).slice(-4).map(([s, e, title, client, booked, secs, kind]) => {
+    const future = kind === 'upcoming' || s > nowS();
+    const st = future ? 'later' : kind === 'missed' ? 'not at Mac' : kind === 'call' ? dur(secs) : `${dur(secs)} / ${dur(booked)}`;
+    return `<div class="mt${future ? ' future' : ''}"><span class="tm">${hm(s)}</span><span class="tt" title="${esc(title)}">${esc(title)}</span><span class="st">${st}</span></div>`;
+  }).join('');
+  return `<div class="sec"><div class="h"><b>Meetings and calls</b><span>${dur(meet)} today</span></div>${next}${rows}</div>`;
+}
+
+function clients() {
+  const d = D.day; if (!d.total) return '';
+  const named = d.clients, sum = named.reduce((p, c) => p + c[1], 0);
+  const max = named.length ? named[0][1] : 1;
+  const rows = named.slice(0, 4).map(([n, s]) => `<div class="cl"><span class="n">${esc(n)}</span><span class="trk"><i style="width:${(s / max * 100).toFixed(1)}%"></i></span><span class="v">${dur(s)}</span></div>`).join('');
+  return `<div class="sec"><div class="h"><b>Clients</b><span>${Math.round(sum / d.total * 100)}% of today</span></div>${rows || '<div class="none">No client work yet today.</div>'}
+    ${d.no_client ? `<div class="none">No client: ${dur(d.no_client)} (internal work, admin, personal)</div>` : ''}</div>`;
+}
+
+function week() {
+  const w = D.week, max = Math.max(8 * 3600, ...w.days.map(x => x[1] || 0));
+  const cols = w.days.map(([key, total], i) => {
+    const today = key === D.today, future = total == null;
+    const h = future ? 4 : Math.max(2, (total + (today ? extra() : 0)) / max * 46);
+    return `<div class="wd${today ? ' today' : ''}${future ? ' future' : ''}" title="${esc(key)} ${future ? '' : dur(total)}"><div class="col" style="height:${h.toFixed(1)}px"></div><span class="l">${'MTWTFSS'[i]}</span></div>`;
+  }).join('');
+  return `<div class="sec"><div class="h"><b>Week ${+w.key.split('-W')[1]}</b><span>${dur(w.total + extra())} &middot; ${dur(w.meet)} meetings &middot; ${w.client_pct}% clients</span></div><div class="week">${cols}</div></div>`;
+}
+
+function draw() {
+  if (!D) return;
+  const d = D.day;
+  const since = d.total ? `since ${hm(d.first)} (DK ${dk(d.first)})` : 'nothing recorded yet';
+  const dt = new Date(D.today + 'T12:00:00').toLocaleDateString('en-GB', {weekday: 'short', day: 'numeric', month: 'short'});
+  document.getElementById('app').innerHTML = `
+    <div class="brand"><img src="logo.png" alt="" onerror="this.remove()"><span class="nm">RM Activity</span><span class="dt">${dt}</span></div>
+    <div class="top"><div><div class="k">Today</div><div class="big" id="total">${dur(d.total + extra())}</div><div class="sub">${since}</div></div>
+      <div class="wk"><div class="k">In meetings</div><div class="mid">${dur(D.meetings_cat != null ? d.cats[D.meetings_cat] : 0)}</div><div class="sub">${d.total ? Math.round((D.meetings_cat != null ? d.cats[D.meetings_cat] : 0) / d.total * 100) : 0}% of today</div></div></div>
+    ${nowCard()}${catBar()}${strip()}${meetings()}${clients()}${week()}
+    ${D.age_warning ? `<div class="warn">${esc(D.age_warning)}</div>` : ''}
+    <div class="foot"><button id="open">Open full page</button></div>`;
+  document.getElementById('open').onclick = () => post({action: 'open'});
+  tick();
+  post({action: 'size', h: Math.ceil(document.getElementById('app').getBoundingClientRect().height)});
+}
+
+function tick() {
+  if (!D) return;
+  const t = document.getElementById('total'); if (t) t.textContent = dur(D.day.total + extra());
+  const n = document.getElementById('nowt');
+  if (n && D.now) n.textContent = D.state === 'active' ? clock(nowS() - D.now.since) : '';
+  if (D.state === 'active' && nowS() - D.generated > 180) { D.state = 'stopped'; draw(); }
+}
+setInterval(tick, 1000);
+setInterval(() => { if (D) draw(); }, 60000);  // move the now-line and the "in 35m" countdown
+</script>
+</body></html>
