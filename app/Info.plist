@@ -10,7 +10,6 @@
     <key>CFBundleShortVersionString</key><string>__VERSION__</string>
     <key>CFBundleVersion</key><string>__VERSION__</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
-    <key>LSUIElement</key><true/>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSAppleEventsUsageDescription</key><string>RM Activity reads the address and title of the tab in front in Chrome, to show your time per site. Incognito windows are never read.</string>

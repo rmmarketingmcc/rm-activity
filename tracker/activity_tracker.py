@@ -126,7 +126,7 @@ CALL_APPS = {"com.google.Chrome": "Google Chrome", "com.brave.Browser": "Brave",
 
 CHROMIUM = {"com.google.Chrome", "com.google.Chrome.beta", "com.google.Chrome.canary", "com.brave.Browser",
             "com.microsoft.edgemac", "com.vivaldi.Vivaldi"}
-NOT_ACTIVITY = {"com.apple.loginwindow", "com.apple.ScreenSaver.Engine", "dk.rmmarketing.activity-widget"}  # a glance at the widget is no activity
+NOT_ACTIVITY = {"com.apple.loginwindow", "com.apple.ScreenSaver.Engine", "dk.rmmarketing.activity-widget", "dk.rmmarketing.rm-activity"}  # a glance at the widget is no activity
 # Browsers whose private windows we cannot detect: their window titles are never read.
 NO_TITLE_BUNDLES = {"com.apple.Safari", "com.apple.SafariTechnologyPreview", "org.mozilla.firefox",
                     "org.mozilla.firefoxdeveloperedition", "org.mozilla.nightly", "company.thebrowser.Browser",
@@ -1402,8 +1402,8 @@ def install_widget() -> None:
         with open(app / "Contents" / "Info.plist", "wb") as f:
             plistlib.dump({
                 "CFBundleIdentifier": WIDGET_ID, "CFBundleName": "RM Activity", "CFBundleDisplayName": "RM Activity",
-                "CFBundleExecutable": exe_name, "CFBundlePackageType": "APPL", "CFBundleVersion": "2",
-                "CFBundleShortVersionString": "2.0", "CFBundleIconFile": "AppIcon", "LSUIElement": True,
+                "CFBundleExecutable": exe_name, "CFBundlePackageType": "APPL", "CFBundleVersion": "3",
+                "CFBundleShortVersionString": "2.1", "CFBundleIconFile": "AppIcon",
                 "NSHighResolutionCapable": True, "LSMinimumSystemVersion": "13.0",
                 "RMDataDir": str(OUT_DIR), "RMPage": str(PAGE_PATH),
             }, f)
@@ -1441,7 +1441,7 @@ def install_widget() -> None:
     con = connect(DB_PATH)
     build_widget(con, Categories())
     subprocess.run(["launchctl", "bootstrap", f"gui/{os.getuid()}", str(plist)], check=True)
-    print(f"built {WIDGET_APP}, started {WIDGET_LABEL} (menu bar; open the app or click the menu bar item for the panel)")
+    print(f"built {WIDGET_APP}, started {WIDGET_LABEL} (Dock app + menu bar time)")
 
 
 def install_app() -> None:

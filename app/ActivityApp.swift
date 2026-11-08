@@ -1,28 +1,30 @@
-// RM Activity: the app for RM Activity (scripts/activity_tracker.py). The menu bar shows today's active time
-// next to the RM monogram (a red dot while on a call); a click opens a panel with the day, the stretch going
-// on now, meetings, clients and the week. Opening the app itself (Dock, Launchpad, Spotlight, Finder) opens
-// the same panel. Right-click the menu bar item: open the full page, put the widget on the desktop (behind
-// windows) or floating on top, or quit.
+// RM Activity: the app for RM Activity (scripts/activity_tracker.py), built like Sales Coach: a Dock icon and a
+// normal window (close, minimise, quit) with the day, the stretch going on now, meetings, clients and the week,
+// plus today's time in the menu bar (a red dot while on a call). The window can stay on top or sit on the
+// desktop behind other windows. Code on GitHub and "Report a problem" are in the menus.
 // It only reads widget.json (written by the tracker every 30 s) and draws widget.html from its own bundle;
-// it records nothing itself. Built by `activity_tracker.py install-widget`.
+// it records nothing itself. Started at login with --login (menu bar only, unless pinned to the desktop).
+// RM's Mac builds it with `activity_tracker.py install-widget`; the public app with build.sh.
 import AppKit
 import WebKit
 
 let navy = NSColor(srgbRed: 25 / 255, green: 34 / 255, blue: 48 / 255, alpha: 1)
+let repoURL = URL(string: "https://github.com/rmmarketingmcc/rm-activity")!
+let issuesURL = URL(string: "https://github.com/rmmarketingmcc/rm-activity/issues/new")!
+let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
 
-final class ActivityApp: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNavigationDelegate {
+final class ActivityApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate, WKScriptMessageHandler, WKNavigationDelegate {
     let width: CGFloat = 340
     let dataURL: URL
     let htmlURL: URL
     let pageURL: URL
-    let startedAtLogin = CommandLine.arguments.contains("--login")
-    var statusItem: NSStatusItem!
-    let popover = NSPopover()
-    var popWeb: WKWebView!
-    var panel: NSPanel?
-    var panelWeb: WKWebView?
+    let atLogin = CommandLine.arguments.contains("--login")
+    var item: NSStatusItem!
+    var window: NSWindow!
+    var web: WKWebView!
     var json = ""
-    var launched = false
+    var summary = ""   // "Today 5h 12m, 1h 10m in meetings" for the menu
+    var state = "stopped"
 
     override init() {
         let info = Bundle.main.infoDictionary ?? [:]
@@ -33,241 +35,266 @@ final class ActivityApp: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         super.init()
     }
 
-    var mode: String {  // "off" | "desktop" | "float"
-        get { UserDefaults.standard.string(forKey: "widgetMode") ?? "off" }
-        set { UserDefaults.standard.set(newValue, forKey: "widgetMode") }
+    /// "normal" | "top" (floats over other windows) | "desktop" (behind every window, on the wallpaper)
+    var level: String {
+        get { UserDefaults.standard.string(forKey: "windowLevel") ?? "normal" }
+        set { UserDefaults.standard.set(newValue, forKey: "windowLevel") }
     }
+
+    // MARK: start
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        if let button = statusItem.button {
-            button.title = " RM"
-            button.imagePosition = .imageLeading
-            button.target = self
-            button.action = #selector(statusClicked(_:))
-            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"), let icon = NSImage(contentsOf: url) {
+            NSApp.applicationIconImage = icon
         }
-        popWeb = makeWeb()
-        let controller = NSViewController()
-        controller.view = popWeb
-        popover.contentViewController = controller
-        popover.contentSize = NSSize(width: width, height: 560)
-        popover.behavior = .transient
-        popover.appearance = NSAppearance(named: .darkAqua)
-        applyMode()
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 560),
+                          styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
+        window.title = "RM Activity"
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden   // the panel has its own header
+        window.backgroundColor = navy
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        web = makeWeb()
+        web.autoresizingMask = [.width, .height]
+        window.contentView = web
+        if !window.setFrameUsingName("RMActivityWindow"), let screen = NSScreen.screens.first {  // first time: top right
+            let v = screen.visibleFrame
+            window.setFrameTopLeftPoint(NSPoint(x: v.maxX - width - 24, y: v.maxY - 24))
+        }
+        window.setFrameAutosaveName("RMActivityWindow")
+        applyLevel()
+
+        NSApp.mainMenu = mainMenu()
+        item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        let menu = NSMenu()
+        menu.delegate = self
+        item.menu = menu
         Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in self?.refresh() }
         refresh()
-        launched = true
-        if !startedAtLogin {  // opened by hand: show the panel right away
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.showPopover() }
-        }
+        if !atLogin || level == "desktop" { showWindow() }
     }
 
-    // Clicking the app again in the Dock, Launchpad, Spotlight or Finder while it runs.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    // Clicking the app in the Dock, Launchpad, Spotlight or Finder while it runs.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if launched { showPopover() }
+        showWindow()
         return false
     }
 
     func makeWeb() -> WKWebView {
         let config = WKWebViewConfiguration()
         config.userContentController.add(self, name: "rm")
-        let web = WKWebView(frame: NSRect(x: 0, y: 0, width: width, height: 560), configuration: config)
-        web.setValue(false, forKey: "drawsBackground")
-        web.navigationDelegate = self
-        web.loadFileURL(htmlURL, allowingReadAccessTo: htmlURL.deletingLastPathComponent())
-        return web
+        let w = WKWebView(frame: NSRect(x: 0, y: 0, width: width, height: 560), configuration: config)
+        w.setValue(false, forKey: "drawsBackground")
+        w.navigationDelegate = self
+        w.loadFileURL(htmlURL, allowingReadAccessTo: htmlURL.deletingLastPathComponent())
+        return w
     }
 
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        if webView === panelWeb { webView.evaluateJavaScript("document.body.classList.add('panel')", completionHandler: nil) }
-        push(webView)
-    }
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { push() }
 
-    func push(_ web: WKWebView?) {
-        guard let web = web, !json.isEmpty else { return }
+    func push() {
+        guard !json.isEmpty else { return }
         web.evaluateJavaScript("window.render && window.render(\(json))", completionHandler: nil)
     }
+
+    // MARK: data
 
     func refresh() {
         guard let data = try? Data(contentsOf: dataURL), let text = String(data: data, encoding: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            setTitle("RM", image: symbol("exclamationmark.triangle"), tint: nil)
+            state = "stopped"
+            setTitle("RM Activity", symbol: "exclamationmark.triangle", tint: nil)
             return
         }
         json = text
         let generated = obj["generated"] as? Double ?? 0
-        let stale = Date().timeIntervalSince1970 - generated > 180
-        let state = stale ? "stopped" : (obj["state"] as? String ?? "active")
-        let title = obj["menubar"] as? String ?? "RM"
+        state = Date().timeIntervalSince1970 - generated > 180 ? "stopped" : (obj["state"] as? String ?? "active")
+        let title = obj["menubar"] as? String ?? "0m"
+        let day = obj["day"] as? [String: Any] ?? [:]
+        let cats = day["cats"] as? [Double] ?? []
+        let mi = obj["meetings_cat"] as? Int
+        let meet = mi.flatMap { $0 < cats.count ? cats[$0] : nil } ?? 0
+        summary = "Today \(title)" + (meet >= 60 ? ", \(dur(meet)) in meetings" : "")
         if state == "stopped" {
-            setTitle(title, image: symbol("exclamationmark.triangle"), tint: nil)
+            setTitle(title, symbol: "exclamationmark.triangle", tint: nil)
         } else if obj["in_call"] as? Bool == true {
-            setTitle(title, image: symbol("circle.fill", size: 8), tint: .systemRed)
+            setTitle(title, symbol: "circle.fill", tint: .systemRed)
         } else {
-            setTitle(title, image: monogram(dim: state != "active"), tint: nil)
+            setTitle(title, symbol: nil, tint: nil)
         }
-        if popover.isShown { push(popWeb) }
-        push(panelWeb)
+        if window.isVisible { push() }
     }
 
-    func symbol(_ name: String, size: CGFloat = 13) -> NSImage? {
-        let image = NSImage(systemSymbolName: name, accessibilityDescription: "RM Activity")?
-            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: size, weight: .regular))
-        image?.isTemplate = true
-        return image
+    func dur(_ secs: Double) -> String {
+        let m = Int((secs / 60).rounded())
+        return m < 60 ? "\(m)m" : (m % 60 == 0 ? "\(m / 60)h" : "\(m / 60)h \(m % 60)m")
     }
 
-    /// The RM monogram as a template image (macOS colours it for the menu bar); falls back to a timer symbol.
-    func monogram(dim: Bool) -> NSImage? {
-        guard let url = Bundle.main.url(forResource: "menubar", withExtension: "png"), let src = NSImage(contentsOf: url) else {
-            return symbol(dim ? "pause.circle" : "timer")
+    /// Text only in the menu bar; a small red dot while on a call, a warning sign when the tracker stopped.
+    func setTitle(_ text: String, symbol: String?, tint: NSColor?) {
+        guard let button = item.button else { return }
+        if let symbol = symbol {
+            let size: CGFloat = symbol == "circle.fill" ? 8 : 13
+            let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "RM Activity")?
+                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: size, weight: .regular))
+            image?.isTemplate = tint == nil
+            button.image = image
+            button.imagePosition = .imageLeading
+            button.title = " " + text
+        } else {
+            button.image = nil
+            button.title = text
         }
-        let h: CGFloat = 15
-        let image = NSImage(size: NSSize(width: (src.size.width / max(src.size.height, 1)) * h, height: h), flipped: false) { rect in
-            src.draw(in: rect, from: .zero, operation: .sourceOver, fraction: dim ? 0.45 : 1)
-            return true
-        }
-        image.isTemplate = true
-        return image
-    }
-
-    func setTitle(_ text: String, image: NSImage?, tint: NSColor?) {
-        guard let button = statusItem.button else { return }
-        button.image = image
         button.contentTintColor = tint
-        button.title = " " + text
         button.font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
     }
 
-    func showPopover() {
-        guard let button = statusItem.button else { return }
+    // MARK: window
+
+    @objc func showWindow() {
+        if window.isMiniaturized { window.deminiaturize(nil) }
         refresh()
-        if !popover.isShown { popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY) }
-        push(popWeb)
-        NSApp.activate(ignoringOtherApps: true)
-    }
-
-    @objc func statusClicked(_ sender: NSStatusBarButton) {
-        let event = NSApp.currentEvent
-        if event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true {
-            statusItem.menu = buildMenu()
-            sender.performClick(nil)
-            statusItem.menu = nil
-            return
+        if level == "desktop" {
+            window.orderFrontRegardless()
+        } else {
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
         }
-        if popover.isShown { popover.performClose(nil) } else { showPopover() }
+        keepOnScreen()
+        push()
     }
 
-    func buildMenu() -> NSMenu {
-        let menu = NSMenu()
-        let open = NSMenuItem(title: "Open full page", action: #selector(openPage), keyEquivalent: "")
-        open.target = self
-        menu.addItem(open)
-        menu.addItem(.separator())
-        for (title, key) in [("Widget on the desktop", "desktop"), ("Widget floating on top", "float"), ("No widget", "off")] {
-            let item = NSMenuItem(title: title, action: #selector(chooseMode(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = key
-            item.state = mode == key ? .on : .off
-            menu.addItem(item)
+    @objc func hideWindow() { window.orderOut(nil) }
+    @objc func toggleWindow() { window.isVisible && !window.isMiniaturized ? hideWindow() : showWindow() }
+    @objc func minimize() { window.miniaturize(nil) }
+
+    func applyLevel() {
+        switch level {
+        case "top":
+            window.level = .floating
+            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        case "desktop":
+            window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)) + 1)
+            window.collectionBehavior = [.canJoinAllSpaces, .stationary]
+        default:
+            window.level = .normal
+            window.collectionBehavior = []
         }
-        menu.addItem(.separator())
-        let quit = NSMenuItem(title: "Quit RM Activity", action: #selector(quitApp), keyEquivalent: "q")
-        quit.target = self
-        menu.addItem(quit)
-        return menu
     }
 
-    @objc func openPage() {
-        popover.performClose(nil)
-        NSWorkspace.shared.open(pageURL)
-    }
+    @objc func toggleTop() { level = level == "top" ? "normal" : "top"; applyLevel(); showWindow() }
+    @objc func toggleDesktop() { level = level == "desktop" ? "normal" : "desktop"; applyLevel(); showWindow() }
 
-    @objc func chooseMode(_ sender: NSMenuItem) {
-        mode = sender.representedObject as? String ?? "off"
-        applyMode()
-    }
-
-    @objc func quitApp() { NSApp.terminate(nil) }
-
-    func applyMode() {
-        if mode == "off" {
-            panel?.orderOut(nil)
-            panel = nil
-            panelWeb = nil
-            return
-        }
-        let p = panel ?? makePanel()
-        panel = p
-        if mode == "float" {
-            p.level = .floating
-            p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        } else {  // on the desktop: above the wallpaper and icons, below every window
-            p.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)) + 1)
-            p.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
-        }
-        p.orderFrontRegardless()
-        push(panelWeb)
-    }
-
-    func makePanel() -> NSPanel {
-        let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: width, height: 560),
-                        styleMask: [.titled, .fullSizeContentView, .nonactivatingPanel],
-                        backing: .buffered, defer: false)
-        p.titlebarAppearsTransparent = true
-        p.titleVisibility = .hidden
-        for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] { p.standardWindowButton(kind)?.isHidden = true }
-        p.isMovableByWindowBackground = true
-        p.isOpaque = false
-        p.backgroundColor = navy
-        p.appearance = NSAppearance(named: .darkAqua)
-        p.hasShadow = true
-        p.hidesOnDeactivate = false
-        p.isReleasedWhenClosed = false
-        let web = makeWeb()
-        web.autoresizingMask = [.width, .height]
-        p.contentView = web
-        panelWeb = web
-        if !p.setFrameUsingName("RMActivityWidget"), let screen = NSScreen.screens.first {  // the menu bar screen
-            let v = screen.visibleFrame
-            p.setFrameTopLeftPoint(NSPoint(x: v.maxX - width - 24, y: v.maxY - 24))
-        }
-        p.setFrameAutosaveName("RMActivityWidget")
-        keepOnScreen(p)
-        return p
-    }
-
-    /// Keep the whole widget on the screen it is mostly on (two screens, a resize, a screen unplugged).
-    func keepOnScreen(_ p: NSPanel) {
-        let screen = NSScreen.screens.max(by: { a, b in
-            area(a.frame.intersection(p.frame)) < area(b.frame.intersection(p.frame))
-        }) ?? NSScreen.screens.first
+    /// Keep the whole window on the screen it is mostly on (two screens, a resize, a screen unplugged).
+    func keepOnScreen() {
+        let f0 = window.frame
+        let screen = NSScreen.screens.max(by: { area($0.frame.intersection(f0)) < area($1.frame.intersection(f0)) }) ?? NSScreen.screens.first
         guard let v = screen?.visibleFrame else { return }
-        var f = p.frame
+        var f = f0
         f.origin.x = min(max(f.origin.x, v.minX + 8), v.maxX - f.width - 8)
         f.origin.y = min(max(f.origin.y, v.minY + 8), v.maxY - f.height - 8)
-        if f != p.frame { p.setFrame(f, display: true) }
+        if f != f0 { window.setFrame(f, display: true) }
     }
 
     func area(_ r: NSRect) -> CGFloat { r.isNull ? 0 : r.width * r.height }
+
+    // MARK: menus
+
+    func entry(_ title: String, _ action: Selector?, _ key: String = "", on: Bool = false) -> NSMenuItem {
+        let it = NSMenuItem(title: title, action: action, keyEquivalent: key)
+        it.target = self
+        it.state = on ? .on : .off
+        return it
+    }
+
+    func mainMenu() -> NSMenu {
+        let bar = NSMenu()
+        let app = NSMenu()
+        app.addItem(entry("Code on GitHub", #selector(openGitHub)))
+        app.addItem(entry("Report a problem...", #selector(reportProblem)))
+        app.addItem(.separator())
+        app.addItem(entry("Hide RM Activity", #selector(hideWindow), "h"))
+        app.addItem(.separator())
+        app.addItem(entry("Quit RM Activity", #selector(quitApp), "q"))
+        let view = NSMenu(title: "View")
+        view.addItem(entry("Open full page", #selector(openPage), "o"))
+        view.addItem(.separator())
+        view.addItem(entry("Keep on top", #selector(toggleTop), "t"))
+        view.addItem(entry("Pin to the desktop", #selector(toggleDesktop)))
+        view.delegate = self
+        let win = NSMenu(title: "Window")
+        win.addItem(entry("Minimize", #selector(minimize), "m"))
+        win.addItem(entry("Close", #selector(hideWindow), "w"))
+        for (title, sub) in [("RM Activity", app), ("View", view), ("Window", win)] {
+            let top = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            top.submenu = sub
+            bar.addItem(top)
+        }
+        return bar
+    }
+
+    // The menu bar item's menu (and the View menu's ticks) are built fresh each time they open.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        if menu.title == "View" {
+            menu.items.first { $0.action == #selector(toggleTop) }?.state = level == "top" ? .on : .off
+            menu.items.first { $0.action == #selector(toggleDesktop) }?.state = level == "desktop" ? .on : .off
+            return
+        }
+        refresh()
+        menu.removeAllItems()
+        let head = entry(state == "stopped" ? "Tracking is not running" : summary, nil)
+        head.isEnabled = false
+        menu.addItem(head)
+        menu.addItem(.separator())
+        menu.addItem(entry(window.isVisible && !window.isMiniaturized ? "Hide window" : "Show window", #selector(toggleWindow)))
+        menu.addItem(entry("Open full page", #selector(openPage)))
+        menu.addItem(.separator())
+        menu.addItem(entry("Keep on top", #selector(toggleTop), on: level == "top"))
+        menu.addItem(entry("Pin to the desktop", #selector(toggleDesktop), on: level == "desktop"))
+        menu.addItem(.separator())
+        menu.addItem(entry("Code on GitHub", #selector(openGitHub)))
+        menu.addItem(entry("Report a problem...", #selector(reportProblem)))
+        let about = entry("RM Activity \(appVersion), made by RM Marketing", nil)
+        about.isEnabled = false
+        menu.addItem(about)
+        menu.addItem(.separator())
+        menu.addItem(entry("Quit RM Activity", #selector(quitApp)))
+    }
+
+    @objc func openPage() { NSWorkspace.shared.open(pageURL) }
+    @objc func openGitHub() { NSWorkspace.shared.open(repoURL) }
+    @objc func quitApp() { NSApp.terminate(nil) }
+
+    /// A GitHub issue with the technical facts filled in. Issues are public: never names, sites or clients.
+    @objc func reportProblem() {
+        let os = ProcessInfo.processInfo.operatingSystemVersionString
+        let body = "What happened:\n\n\nWhat did you expect:\n\n\n---\nRM Activity \(appVersion), macOS \(os)\nTracker: \(state)\n"
+        var parts = URLComponents(url: issuesURL, resolvingAgainstBaseURL: false)!
+        parts.queryItems = [URLQueryItem(name: "body", value: body)]
+        if let url = parts.url { NSWorkspace.shared.open(url) }
+    }
+
+    // MARK: messages from the panel
 
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let body = message.body as? [String: Any], let action = body["action"] as? String else { return }
         switch action {
         case "open":
             openPage()
-        case "size":
+        case "github":
+            openGitHub()
+        case "size":  // the window follows the panel's height, keeping its top edge where it is
             let h = min(max(CGFloat(body["h"] as? Double ?? 560), 180), 900)
-            if message.webView === popWeb {
-                popover.contentSize = NSSize(width: width, height: h)
-            } else if let p = panel, message.webView === panelWeb {
-                var frame = p.frame
-                let top = frame.maxY
-                frame.size.height = h
-                frame.origin.y = top - h
-                p.setFrame(frame, display: true)
-                keepOnScreen(p)
+            let content = window.contentRect(forFrameRect: window.frame)
+            if abs(content.height - h) > 1 {
+                var f = window.frameRect(forContentRect: NSRect(x: content.minX, y: content.maxY - h, width: width, height: h))
+                f.origin.y = window.frame.maxY - f.height
+                window.setFrame(f, display: true)
+                keepOnScreen()
             }
         default:
             break
@@ -278,5 +305,5 @@ final class ActivityApp: NSObject, NSApplicationDelegate, WKScriptMessageHandler
 let app = NSApplication.shared
 let delegate = ActivityApp()
 app.delegate = delegate
-app.setActivationPolicy(.accessory)
+app.setActivationPolicy(.regular)   // a Dock icon: open, minimise, close like any app
 app.run()
