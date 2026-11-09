@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
 """Refuses (exit 1) when a file in this repo names an RM client or lead, their mail address or domain, or an RM
 team address. The names come from RM's private client registry at run time, so this file itself names nobody.
-Run by sync.sh and release.sh; only works on a Mac that has the RM repo (~/google-ads-mcp)."""
+Run by sync.sh and release.sh, and by Sales Coach's release.sh as SALES_COACH_LEAK_CHECK (with that repo's path).
+Only works on a Mac that has the RM repo (~/google-ads-mcp)."""
 import json
 import re
 import subprocess
 import sys
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
+REPO = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else Path(__file__).resolve().parent.parent  # also the leak check for other public repos (Sales Coach)
 RM = Path.home() / "google-ads-mcp"
 GENERIC = {"google", "design", "digital", "online", "marketing", "studio", "group", "shine", "nspire", "consulting",
            "lead", "leads", "audit", "partner", "home", "media", "contact", "ghost", "lost"}
 MAIL_PROVIDERS = {"gmail.com", "googlemail.com", "hotmail.com", "hotmail.dk", "outlook.com", "outlook.dk", "live.com", "live.dk",
-                  "icloud.com", "me.com", "yahoo.com", "yahoo.dk", "mail.dk", "jubii.dk", "protonmail.com"}
+                  "icloud.com", "me.com", "mac.com", "yahoo.com", "yahoo.dk", "mail.dk", "jubii.dk", "protonmail.com",
+                  "proton.me", "gmx.com", "gmx.net", "aol.com", "msn.com", "tdcadsl.dk", "stofanet.dk", "youmail.dk"}
 
 
 def needles() -> set:
