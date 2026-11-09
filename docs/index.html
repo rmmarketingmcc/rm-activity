@@ -84,6 +84,10 @@ h2{font-size:38px;line-height:1.15;margin:0 0 14px;letter-spacing:-.8px}
 .checks li{display:grid;grid-template-columns:28px 1fr;gap:10px;color:var(--muted)}
 .checks li b{color:var(--ink);display:block}
 .checks svg{width:24px;height:24px;stroke:var(--green);margin-top:3px}
+.gdpr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;margin-top:40px}
+.gdpr>div{background:#fff;border:1px solid var(--line);border-left:4px solid var(--lime);border-radius:14px;padding:20px 22px}
+.gdpr h3{margin:0 0 6px;font-size:17px}
+.gdpr p{margin:0;color:var(--muted)}
 .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;counter-reset:s}
 .step{background:#fff;border:1px solid var(--line);border-radius:16px;padding:24px}
 .step::before{counter-increment:s;content:counter(s);display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:var(--lime);color:var(--navy);font-weight:700;margin-bottom:12px}
@@ -111,7 +115,7 @@ footer .sp{margin-left:auto}
 .reveal.in{opacity:1;transform:none}
 @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}.reveal{opacity:1;transform:none;transition:none}.compare .fill{transition:none}}
 @media (max-width:960px){.hero{grid-template-columns:minmax(0,1fr);gap:56px;padding-top:24px}h1{font-size:42px;letter-spacing:-1px}.split{grid-template-columns:minmax(0,1fr);gap:32px}
-.facts{grid-template-columns:1fr;margin-top:-36px}.cards,.steps,.checks{grid-template-columns:1fr}.top nav a.hide{display:none}h2{font-size:30px}section.part{padding:64px 0}
+.facts{grid-template-columns:1fr;margin-top:-36px}.cards,.steps,.checks,.gdpr{grid-template-columns:1fr}.top nav a.hide{display:none}h2{font-size:30px}section.part{padding:64px 0}
 footer .sp{margin-left:0}}
 @media (max-width:480px){.wrap,.hero,footer .in{padding-left:16px;padding-right:16px}h1{font-size:36px}.lead{font-size:17px}.install{padding-left:14px}.chip{right:8px}}
 </style></head>
@@ -119,7 +123,7 @@ footer .sp{margin-left:0}}
 <div class="dark">
   <header class="top"><div class="wrap in">
     <img src="icon.png" alt=""><span class="nm">RM Activity</span>
-    <nav><a class="hide" href="#features">Features</a><a class="hide" href="#safe">Safety</a><a class="hide" href="#faq">FAQ</a>
+    <nav><a class="hide" href="#features">Features</a><a class="hide" href="#privacy">Security &amp; GDPR</a><a class="hide" href="#faq">FAQ</a>
       <a class="btn line" href="https://github.com/rmmarketingmcc/rm-activity"><svg class="i" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.56-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.47.11-3.06 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.77.11 3.06.74.81 1.19 1.84 1.19 3.1 0 4.42-2.69 5.39-5.25 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>GitHub</a></nav>
   </div></header>
   <div class="wrap hero">
@@ -175,9 +179,9 @@ footer .sp{margin-left:0}}
     </div>
   </div></section>
 
-  <section class="part" id="safe"><div class="wrap">
-    <h2 class="reveal">Safe to install</h2>
-    <p class="sub reveal">It sees a lot of your day, so it is built to keep that with you.</p>
+  <section class="part" id="privacy"><div class="wrap">
+    <h2 class="reveal">Security and GDPR</h2>
+    <p class="sub reveal">It sees a lot of your day, so it is built to keep that with you. We never receive any of it.</p>
     <ul class="checks">
       <li class="reveal"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg><span><b>Nothing leaves your Mac</b>No account, no cloud, no analytics, not even update checks. Your days are in a folder only you can read.</span></li>
       <li class="reveal"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg><span><b>Open source</b>Every line is on GitHub, and the app is built from exactly that code.</span></li>
@@ -186,6 +190,12 @@ footer .sp{margin-left:0}}
       <li class="reveal"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg><span><b>Never the private bits</b>Incognito windows, Safari pages, password managers and anything after ? in a web address are never recorded. Away for 3 minutes and the clock stops.</span></li>
       <li class="reveal"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg><span><b>You stay in charge</b>No admin password. Both permissions are optional and can be taken back in System Settings. One line removes it all.</span></li>
     </ul>
+    <div class="gdpr reveal">
+      <div><h3>We get nothing, so there is nothing to hand over</h3><p>RM Marketing runs no server for RM Activity and never receives your data: no account, no analytics, no crash reports. Your days are yours alone, on your Mac, and deleting the folder <code class="k">~/Library/Application Support/RM Activity</code> removes all of it.</p></div>
+      <div><h3>Other people's names stay with you</h3><p>Window and page titles can carry names, like a mail's subject line. They are stored only on your Mac, and the microphone check only asks which app is using the microphone, never what is said.</p></div>
+      <div><h3>For your own time, not to watch others</h3><p>It is built to track your own day. Keeping track of employees is covered by GDPR and employment rules: tell people first and have a clear reason. Each person's data stays on their own Mac.</p></div>
+      <div><h3>A website without tracking</h3><p>This page sets no cookies and has no analytics; even the font is hosted here. It runs on GitHub Pages, which keeps its own server logs. A problem report goes to GitHub and is public, so it only fills in the version and macOS.</p></div>
+    </div>
   </div></section>
 
   <section class="part"><div class="wrap">
@@ -201,6 +211,8 @@ footer .sp{margin-left:0}}
   <section class="part" id="faq"><div class="wrap faq">
     <h2 class="reveal">Questions</h2>
     <details><summary>Does it slow my Mac down?</summary><p>No. It looks once every five seconds and uses well under 1% of one processor core and around 55 MB of memory.</p></details>
+    <details><summary>My day does not end at midnight</summary><p>Choose <b>View &gt; Day starts at</b> in the app, from midnight up to 08:00. Work before that time still counts as the day before, so an evening that runs until 5 in the morning stays one day. Old days are recounted too.</p></details>
+    <details><summary>Can I make the text bigger?</summary><p>Yes: ⌘+ and ⌘- in the app, ⌘0 for the normal size.</p></details>
     <details><summary>Which browsers does it read?</summary><p>Chrome, Brave, Edge and Vivaldi: the site, the path and the tab title. Safari and Firefox count as app time only, because their private windows cannot be told apart from normal ones.</p></details>
     <details><summary>How do I add my clients?</summary><p>Open <code class="k">~/Library/Application Support/RM Activity/settings.json</code> and add them to the list. Changes apply to old days too.</p>
 <pre>"clients": {

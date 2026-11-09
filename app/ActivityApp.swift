@@ -26,6 +26,13 @@ final class ActivityApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     var json = ""
     var summary = ""   // "Today 5h 12m, 1h 10m in meetings" for the menu
     var state = "stopped"
+    var dayStart = "00:00"   // when a day starts, from widget.json (the tracker's current setting)
+    let dayStarts = ["00:00", "03:00", "04:00", "05:00", "06:00", "07:00", "08:00"]
+
+    var zoom: CGFloat {  // text size, ⌘+ / ⌘- / ⌘0
+        get { CGFloat(UserDefaults.standard.object(forKey: "zoom") as? Double ?? 1.0) }
+        set { UserDefaults.standard.set(Double(newValue), forKey: "zoom") }
+    }
 
     override init() {
         let info = Bundle.main.infoDictionary ?? [:]
@@ -90,6 +97,7 @@ final class ActivityApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         config.userContentController.add(self, name: "rm")
         let w = WKWebView(frame: NSRect(x: 0, y: 0, width: width, height: 560), configuration: config)
         w.setValue(false, forKey: "drawsBackground")
+        w.pageZoom = zoom
         w.navigationDelegate = self
         w.loadFileURL(htmlURL, allowingReadAccessTo: htmlURL.deletingLastPathComponent())
         return w
@@ -112,6 +120,7 @@ final class ActivityApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             return
         }
         json = text
+        dayStart = obj["day_starts_at"] as? String ?? "00:00"
         let generated = obj["generated"] as? Double ?? 0
         state = Date().timeIntervalSince1970 - generated > 180 ? "stopped" : (obj["state"] as? String ?? "active")
         let title = obj["menubar"] as? String ?? "0m"
@@ -227,6 +236,15 @@ final class ActivityApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         view.addItem(.separator())
         view.addItem(entry("Keep on top", #selector(toggleTop), "t"))
         view.addItem(entry("Pin to the desktop", #selector(toggleDesktop)))
+        view.addItem(.separator())
+        view.addItem(entry("Bigger text", #selector(bigger), "+"))
+        let biggerEq = entry("Bigger text", #selector(bigger), "=")   // ⌘= is ⌘+ without shift on many keyboards
+        biggerEq.isHidden = true
+        view.addItem(biggerEq)
+        view.addItem(entry("Smaller text", #selector(smaller), "-"))
+        view.addItem(entry("Actual size", #selector(actualSize), "0"))
+        view.addItem(.separator())
+        view.addItem(dayStartItem())
         view.delegate = self
         let win = NSMenu(title: "Window")
         win.addItem(entry("Minimize", #selector(minimize), "m"))
@@ -241,6 +259,10 @@ final class ActivityApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     // The menu bar item's menu (and the View menu's ticks) are built fresh each time they open.
     func menuNeedsUpdate(_ menu: NSMenu) {
+        if menu.title == "Day starts at" {
+            for it in menu.items { it.state = (it.representedObject as? String) == dayStart ? .on : .off }
+            return
+        }
         if menu.title == "View" {
             menu.items.first { $0.action == #selector(toggleTop) }?.state = level == "top" ? .on : .off
             menu.items.first { $0.action == #selector(toggleDesktop) }?.state = level == "desktop" ? .on : .off
@@ -257,6 +279,7 @@ final class ActivityApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         menu.addItem(.separator())
         menu.addItem(entry("Keep on top", #selector(toggleTop), on: level == "top"))
         menu.addItem(entry("Pin to the desktop", #selector(toggleDesktop), on: level == "desktop"))
+        menu.addItem(dayStartItem())
         menu.addItem(.separator())
         menu.addItem(entry("RM Activity website", #selector(openWebsite)))
         menu.addItem(entry("Code on GitHub", #selector(openGitHub)))
@@ -266,6 +289,50 @@ final class ActivityApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         menu.addItem(about)
         menu.addItem(.separator())
         menu.addItem(entry("Quit RM Activity", #selector(quitApp)))
+    }
+
+    /// "Day starts at": before this time, work still counts as the day before (a night session stays one day).
+    func dayStartItem() -> NSMenuItem {
+        let item = NSMenuItem(title: "Day starts at", action: nil, keyEquivalent: "")
+        let sub = NSMenu(title: "Day starts at")
+        for v in dayStarts {
+            let it = entry(v == "00:00" ? "Midnight" : v, #selector(chooseDayStart(_:)), on: v == dayStart)
+            it.representedObject = v
+            sub.addItem(it)
+        }
+        sub.delegate = self
+        item.submenu = sub
+        return item
+    }
+
+    /// Written to prefs.json next to widget.json; the tracker sees it within 5 s and recounts every day.
+    @objc func chooseDayStart(_ sender: NSMenuItem) {
+        guard let v = sender.representedObject as? String else { return }
+        let url = dataURL.deletingLastPathComponent().appendingPathComponent("prefs.json")
+        var prefs = (try? JSONSerialization.jsonObject(with: Data(contentsOf: url))) as? [String: Any] ?? [:]
+        prefs["day_starts_at"] = v
+        if let data = try? JSONSerialization.data(withJSONObject: prefs, options: [.prettyPrinted]) {
+            try? data.write(to: url, options: .atomic)
+        }
+        dayStart = v
+        for delay in [7.0, 15.0] {  // the tracker rewrites widget.json within a few seconds
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.refresh(); self?.push() }
+        }
+    }
+
+    @objc func bigger() { setZoom(zoom + 0.1) }
+    @objc func smaller() { setZoom(zoom - 0.1) }
+    @objc func actualSize() { setZoom(1.0) }
+
+    func setZoom(_ z: CGFloat) {
+        zoom = min(max((z * 10).rounded() / 10, 0.8), 1.6)
+        web.pageZoom = zoom
+        var f = window.frame
+        let top = f.maxY
+        f.size.width = window.frameRect(forContentRect: NSRect(x: 0, y: 0, width: width * zoom, height: 10)).width
+        f.origin.y = top - f.height
+        window.setFrame(f, display: true)
+        push()   // the panel re-measures itself and sends its new height
     }
 
     @objc func openPage() { NSWorkspace.shared.open(pageURL) }
@@ -296,10 +363,11 @@ final class ActivityApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         case "report":
             reportProblem()
         case "size":  // the window follows the panel's height, keeping its top edge where it is
-            let h = min(max(CGFloat(body["h"] as? Double ?? 560), 180), 900)
+            let maxH = (window.screen ?? NSScreen.main)?.visibleFrame.height ?? 900
+            let h = min(max(CGFloat(body["h"] as? Double ?? 560) * zoom, 180), maxH - 40)
             let content = window.contentRect(forFrameRect: window.frame)
-            if abs(content.height - h) > 1 {
-                var f = window.frameRect(forContentRect: NSRect(x: content.minX, y: content.maxY - h, width: width, height: h))
+            if abs(content.height - h) > 1 || abs(content.width - width * zoom) > 1 {
+                var f = window.frameRect(forContentRect: NSRect(x: content.minX, y: content.maxY - h, width: width * zoom, height: h))
                 f.origin.y = window.frame.maxY - f.height
                 window.setFrame(f, display: true)
                 keepOnScreen()

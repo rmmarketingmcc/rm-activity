@@ -137,7 +137,7 @@ function strip() {
   const x = s => ((s - start) / (end - start) * 100).toFixed(2);
   const blocks = d.blocks.map(([s, e, c]) => `<i style="left:${x(s)}%;width:max(1px,${(x(e) - x(s)).toFixed(2)}%);background:${color(c)}"></i>`).join('');
   const nl = `<span class="nowline" style="left:${x(nowS() - D.t0)}%"></span>`;
-  const t = s => { const h = Math.floor(s / 3600) % 24; return pad(h) + ':00'; };
+  const t = s => hm(D.t0 + s);  // real clock times: a day can start at 06:00
   return `<div class="strip">${blocks}${nl}</div><div class="axis"><span>${t(start)}</span><span>${t(start + (end - start) / 2)}</span><span>${t(end)}</span></div>`;
 }
 

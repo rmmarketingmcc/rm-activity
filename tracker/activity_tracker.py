@@ -85,6 +85,7 @@ LOCK_PATH = OUT_DIR / "run.lock"
 CATEGORIES_PATH = APP_HOME / "settings.json" if APP_HOME else ROOT / "scripts" / "activity_categories.json"
 CALENDAR_HELPER = ROOT / "agents" / ("calendar_helper.py" if not APP_HOME else "-")  # RM only: Google Calendar, RM's token
 CALENDAR_PATH = OUT_DIR / "calendar.json"
+PREFS_PATH = OUT_DIR / "prefs.json"  # choices made in the app (View > Day starts at)
 REGISTRY_PATH = ROOT / "data" / ("client_email_registry.json" if not APP_HOME else "-")  # RM only
 APP_PATH = Path.home() / "Applications" / "RM Activity.app"
 LABEL = "dk.rmmarketing.rm-activity.tracker" if APP_HOME else "com.rmmarketing.activity-tracker"
@@ -612,6 +613,7 @@ def run() -> None:
     last = last_call = 0.0
     last_page = last_state = last_ax = last_cal = last_widget = 0.0
     cal_job: subprocess.Popen | None = None
+    prefs_seen = 0.0
     log("started")
     while True:
         now = time.time()
@@ -667,6 +669,12 @@ def run() -> None:
                                                   "titles": notes.get("titles", "not checked yet"),
                                                   "mic": notes.get("mic", "not checked yet"),
                                                   "call": key[5] if state == "active" else ""}))
+            try:
+                prefs_m = PREFS_PATH.stat().st_mtime
+            except OSError:
+                prefs_m = 0.0
+            if prefs_m != prefs_seen:  # changed in the app (e.g. View > Day starts at): show it right away
+                prefs_seen, last_widget, last_page = prefs_m, 0.0, 0.0
             if cal_job and cal_job.poll() is not None:
                 cal_job = None
             if now - last_cal > CAL_EVERY and not cal_job and CALENDAR_HELPER.exists():
@@ -686,8 +694,44 @@ def run() -> None:
 
 # ---------------------------------------------------------------- per-day numbers
 
+_DAY_HM: tuple = (None, 0.0)
+
+
+def day_hm() -> tuple[int, int]:
+    """When a day starts (hour, minute), midnight to noon: 'day_starts_at' in the app's prefs.json, else in the
+    settings, else 00:00. At 06:00 a night that runs from Sunday evening until 5 in the morning is all Sunday
+    (Rasmus 2026-11-09: he works late in Bangkok and counts the night with the day it began)."""
+    global _DAY_HM
+    if _DAY_HM[0] is not None and time.time() - _DAY_HM[1] < 5:
+        return _DAY_HM[0]
+    raw = "00:00"
+    for path in (CATEGORIES_PATH, PREFS_PATH):  # the app's choice wins over the settings file
+        try:
+            raw = json.loads(path.read_text()).get("day_starts_at") or raw
+        except (OSError, ValueError, AttributeError):
+            pass
+    try:
+        h, m = (int(x) for x in str(raw).split(":", 1))
+        hm = (h, m) if 0 <= h * 60 + m <= 12 * 60 and 0 <= m < 60 else (0, 0)
+    except ValueError:
+        hm = (0, 0)
+    _DAY_HM = (hm, time.time())
+    return hm
+
+
 def day_start(d: date) -> float:
-    return datetime.combine(d, dtime.min).timestamp()
+    h, m = day_hm()
+    return datetime.combine(d, dtime(h, m)).timestamp()
+
+
+def day_of(ts: float) -> date:
+    """The day a moment counts towards: before the day's start time it still belongs to the day before."""
+    h, m = day_hm()
+    return (datetime.fromtimestamp(ts) - timedelta(hours=h, minutes=m)).date()
+
+
+def logical_today() -> date:
+    return day_of(time.time())
 
 
 def week_key(d: date) -> str:
@@ -708,7 +752,7 @@ def fetch_calendar(con: sqlite3.Connection) -> int:
     creds = get_calendar_creds()
     if not creds.valid:
         creds.refresh(Request())
-    start = (first_day(con) or date.today()) - timedelta(days=1)
+    start = (first_day(con) or logical_today()) - timedelta(days=1)
     params = {"timeMin": datetime.combine(start, dtime.min).astimezone().isoformat(),
               "timeMax": (datetime.now().astimezone() + timedelta(days=2)).isoformat(),
               "singleEvents": "true", "orderBy": "startTime", "maxResults": 250}
@@ -1105,7 +1149,7 @@ def build(rows: list[tuple], first: date, last: date, cats: Categories, clients:
         else:
             m = None if not in_meeting else m
             client = clients.of(host, path, title)
-        d = datetime.fromtimestamp(a).date()
+        d = day_of(a)
         while d <= last:
             t0, t1 = day_start(d), day_start(d + timedelta(days=1))
             x, y = max(a, t0), min(b, t1)
@@ -1165,7 +1209,7 @@ def build(rows: list[tuple], first: date, last: date, cats: Categories, clients:
 
 def first_day(con: sqlite3.Connection) -> date | None:
     row = con.execute("SELECT MIN(start_ts) FROM sessions").fetchone()
-    return datetime.fromtimestamp(row[0]).date() if row and row[0] else None
+    return day_of(row[0]) if row and row[0] else None
 
 
 # ---------------------------------------------------------------- report (terminal)
@@ -1292,7 +1336,7 @@ def page_images() -> tuple[str, str]:
 
 
 def build_page(con: sqlite3.Connection, cats: Categories) -> Path:
-    today = date.today()
+    today = logical_today()
     start = max(today - timedelta(days=PAGE_DAYS - 1), first_day(con) or today)
     rows = load_rows(con, day_start(start), time.time() + 60)
     clients = Clients(cats.client_cfg)
@@ -1327,7 +1371,7 @@ def build_widget(con: sqlite3.Connection, cats: Categories) -> Path:
     """widget.json for the RM Activity Widget (menu bar + desktop): today, the stretch going on now,
     today's meetings and the next one, top clients and the week so far. Rewritten every 30 s."""
     now = time.time()
-    today = date.today()
+    today = logical_today()
     monday = today - timedelta(days=today.weekday())
     clients = Clients(cats.client_cfg)
     meetings = load_meetings()
@@ -1364,6 +1408,7 @@ def build_widget(con: sqlite3.Connection, cats: Categories) -> Path:
     meet_i = cats.meetings
     data = {
         "generated": now, "today": today.isoformat(), "t0": t0, "categories": cats.names, "meetings_cat": meet_i,
+        "day_starts_at": "%02d:%02d" % day_hm(),
         "state": "active" if active else ("away" if running else "stopped"),
         "in_call": bool(active and cur and cur["call"]),
         "menubar": fmt_dur(day["total"]) if day["total"] else "0m",
@@ -1728,7 +1773,7 @@ function timeline(day) {
   }
   const hrs = h1 - h0, perLabel = box.clientWidth / hrs;  // keep hour labels ~50px apart
   const axis = el('div', 'axis'), step = [1, 2, 3, 4, 6].find(s => perLabel * s >= 50) || 6;
-  for (let h = h0; h <= h1; h += step) { const t = el('span', 'tick', pad(h % 24) + ':00'); t.style.left = x(h * 3600) + '%'; if (h === h1 && h > h0) t.style.transform = 'translateX(-100%)'; axis.append(t); }
+  for (let h = h0; h <= h1; h += step) { const t = el('span', 'tick', tl(day, h * 3600)); t.style.left = x(h * 3600) + '%'; if (h === h1 && h > h0) t.style.transform = 'translateX(-100%)'; axis.append(t); }
   box.append(band, axis);
 }
 
@@ -1744,7 +1789,7 @@ function hours(day) {
   const wrap = el('div', 'cols'); wrap.append(el('span', 'ref', '60 min'));
   per.forEach((row, i) => {
     const col = el('div', 'col'), stack = el('div', 'stack');
-    const h = h0 + i, label = `${pad(h % 24)}:00-${pad((h + 1) % 24)}:00`;
+    const h = h0 + i, label = `${tl(day, h * 3600)}-${tl(day, (h + 1) * 3600)}`;
     row.forEach((v, c) => {
       if (v < 20) return;
       const seg = el('div', 'seg'); seg.style.height = `calc(${v / 3600 * 100}% - 2px)`; seg.style.background = color(c);
@@ -1752,7 +1797,7 @@ function hours(day) {
       stack.append(seg);
     });
     const every = box.clientWidth / per.length < 26 ? 3 : 1;
-    col.append(stack, el('span', 'lbl', i % every ? ' ' : pad(h % 24)));
+    col.append(stack, el('span', 'lbl', i % every ? ' ' : tl(day, h * 3600).slice(0, 2)));
     wrap.append(col);
   });
   box.append(wrap);
@@ -2030,11 +2075,11 @@ def main() -> None:
         cats = Categories()
         if args.cmd == "report":
             raw = (args.date or "today").lower()
-            end = date.today() - timedelta(days=1) if raw == "yesterday" else date.today() if raw == "today" else date.fromisoformat(raw)
+            end = logical_today() - timedelta(days=1) if raw == "yesterday" else logical_today() if raw == "today" else date.fromisoformat(raw)
             ndays = max(1, args.days)
             if args.week:
                 monday = end - timedelta(days=end.weekday())
-                end = min(monday + timedelta(days=6), date.today())
+                end = min(monday + timedelta(days=6), logical_today())
                 ndays = (end - monday).days + 1
             report(con, cats, end, ndays, args.top, args.pages)
         elif args.cmd == "page":
