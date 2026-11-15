@@ -194,6 +194,24 @@
    ]
   }
  ],
+ "sales_category": "LinkedIn & sales",
+ "sales_target_percent": [],
+ "focus": {
+  "_about": "The Focus card. Solo work only (meetings and calls left out). A switch = landing on another app or site for switch_min_seconds or more (flicking through tabs is not ten switches). A focus block = block_minutes or more on one category, where visits elsewhere under 2 minutes do not end it. interrupters = the categories whose short visits inside a block are named as what broke into it. window_switch_apps = apps where moving to another window counts as a switch (a new Claude Code chat in VS Code). sales_category (above): time there with no lead named counts as sales on the Sales and clients card; sales_target_percent = the share of your time you aim to give sales, e.g. [30, 40], drawn on that card (empty = no target).",
+  "block_minutes": 25,
+  "switch_min_seconds": 10,
+  "window_switch_apps": [
+   "Code",
+   "Visual Studio Code",
+   "Cursor"
+  ],
+  "interrupters": [
+   "Email & chat",
+   "LinkedIn & sales",
+   "Social, video & games",
+   "News"
+  ]
+ },
  "never_read_titles": [
   "1Password",
   "1Password 7",
@@ -244,7 +262,7 @@
   "booked_meeting_evidence_minutes": 2
  },
  "clients": {
-  "_about": "Time per client. A booked meeting has no calendar here; a stretch belongs to a client when its name, an alias or a domain shows up in the page title, the web address or the window title (a Claude Code session name counts too). Add one entry per client to list. alias_stoplist = words never used as an alias.",
+  "_about": "Time per client. A booked meeting has no calendar here; a stretch belongs to a client when its name, an alias or a domain shows up in the page title, the web address or the window title (a Claude Code session name counts too). Add one entry per client to list. A lead (someone you are selling to) gets \"kind\": \"lead\": its time counts as sales on the Sales and clients card until \"client_since\": \"YYYY-MM-DD\", the day it signed, and as client work from then on. alias_stoplist = words never used as an alias.",
   "list": [
    {
     "name": "Example Client",
@@ -253,6 +271,18 @@
     ],
     "domains": [
      "example.com"
+    ],
+    "emails": []
+   },
+   {
+    "name": "Example Lead",
+    "kind": "lead",
+    "client_since": "",
+    "aliases": [
+     "example lead"
+    ],
+    "domains": [
+     "example.org"
     ],
     "emails": []
    }

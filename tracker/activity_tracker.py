@@ -23,7 +23,11 @@ Read time (page and report), nothing extra stored: booked meetings from the cale
 refreshed hourly in a child process) give each meeting its name and client; Claude Code session names
 are restored in full from ~/.claude/projects (VS Code cuts them); every stretch gets a client from the
 meeting's guests or a client's name/domain in its title, host or path (data/client_email_registry.json).
-The page has a day and a week view.
+The page has day, week, month, quarter and free date-range views (Rasmus 2026-11-15). Every tracked day is on it:
+the last 31 with timeline and log, older ones with their totals only. Two cards answer "do I prioritise sales"
+and "how much do I switch": Sales and clients (a lead's time is sales, a client's is client work from the day its
+lead file says signed or won; measured against sales_target_percent, Rasmus: 30-40%) and Focus (switches per hour,
+a change of Claude chat in VS Code counted as one, focus blocks of 25+ minutes, what broke into them).
 
 Permissions: launchd starts "RM Activity Tracker.app" (a 20-line C launcher built by install-helper),
 which runs this script as its child. macOS ties Accessibility and the Chrome permission to that app,
@@ -36,7 +40,7 @@ so editing them re-sorts old days too.
 
 Usage:
     python3 scripts/activity_tracker.py run                 # the loop (launchd com.rmmarketing.activity-tracker)
-    python3 scripts/activity_tracker.py report [--date YYYY-MM-DD] [--days N | --week] [--top N] [--pages]
+    python3 scripts/activity_tracker.py report [--date YYYY-MM-DD] [--days N | --week | --month | --quarter | --from YYYY-MM-DD] [--top N] [--pages]
     python3 scripts/activity_tracker.py calendar            # refresh calendar.json now (the loop does it hourly)
     python3 scripts/activity_tracker.py page [--open]       # rebuild data/activity_tracker/index.html
     python3 scripts/activity_tracker.py status              # running? last sample? Chrome access?
@@ -87,6 +91,7 @@ CALENDAR_HELPER = ROOT / "agents" / ("calendar_helper.py" if not APP_HOME else "
 CALENDAR_PATH = OUT_DIR / "calendar.json"
 PREFS_PATH = OUT_DIR / "prefs.json"  # choices made in the app (View > Day starts at)
 REGISTRY_PATH = ROOT / "data" / ("client_email_registry.json" if not APP_HOME else "-")  # RM only
+LEAD_DIR = ROOT / ("lead_md" if not APP_HOME else "-")  # RM only: the day a lead signed (stage_history)
 APP_PATH = Path.home() / "Applications" / "RM Activity.app"
 LABEL = "dk.rmmarketing.rm-activity.tracker" if APP_HOME else "com.rmmarketing.activity-tracker"
 PLIST_SRC = ROOT / "scripts" / f"{LABEL}.plist"
@@ -109,8 +114,10 @@ IDLE_LIMIT = 180    # no input this long = away
 SLEEP_GAP = 30      # a gap this long between two samples = the Mac slept or the loop stalled
 PAGE_EVERY = 300    # rebuild the page this often while running
 WIDGET_EVERY = 30   # rewrite widget.json (menu bar + desktop widget) this often
-PAGE_DAYS = 31      # days with full detail on the page
+PAGE_DAYS = 31      # days with full detail on the page (timeline, log); older days carry their totals only
 MERGE_GAP = 30      # same site/app again within this many seconds = one stretch in the log
+DETOUR = 120        # focus: a visit elsewhere shorter than this does not end a focus block
+BREAK_GAP = 180     # focus: a gap this long between two stretches is a break, not a switch
 TAB_CARRY = 30      # a failed tab read reuses the last good one this fresh
 CAL_EVERY = 3600    # refresh the calendar copy this often
 CALL_TABS_EVERY = 60  # while Chrome has the mic, look for its meeting tab this often
@@ -170,6 +177,16 @@ class Categories:
         self.not_a_call = tuple(calls.get("not_a_call", []))
         self.evidence = int(calls.get("booked_meeting_evidence_minutes", 2)) * 60
         self.meetings = self.names.index("Meetings") if "Meetings" in self.names else None
+        sales = cfg.get("sales_category") or next((n for n in self.names if "sales" in n.lower()), "")
+        self.sales = self.names.index(sales) if sales in self.names else None  # no-client time here counts as sales
+        target = [float(x) for x in cfg.get("sales_target_percent", [])][:2]  # [low, high] share of your time
+        self.sales_target = target if len(target) == 2 and 0 <= target[0] <= target[1] <= 100 else None
+        focus = cfg.get("focus", {})
+        self.focus_block = int(focus.get("block_minutes", 25)) * 60
+        self.switch_min = int(focus.get("switch_min_seconds", 10))  # passing through a tab for one sample is no switch
+        self.interrupters = [self.names.index(n) for n in focus.get("interrupters", ["Email & chat", "LinkedIn & sales",
+                             "Social, video & games", "News"]) if n in self.names]
+        self.window_switch = set(focus.get("window_switch_apps", ["Code", "Visual Studio Code", "Cursor"]))  # a new window = a switch
         self.client_cfg = cfg.get("clients", {})
         self.mtime = CATEGORIES_PATH.stat().st_mtime
 
@@ -845,6 +862,7 @@ class Clients:
         self.by_email: dict[str, int] = {}
         self.by_domain: dict[str, int] = {}
         self.alias_of: dict[str, int] = {}
+        self.kind_of: dict[str, tuple[bool, date | None]] = {}  # name -> (a client?, the day it signed)
         self.regex: re.Pattern | None = None
         self._cache: dict[tuple, str] = {}
         reg: dict = {"all_clients": []}
@@ -853,8 +871,10 @@ class Clients:
                 reg = json.loads(REGISTRY_PATH.read_text())
             except (OSError, ValueError) as e:
                 log(f"client registry unreadable: {e}")
-        # Anyone: "clients": {"list": [{"name": "Acme", "aliases": ["acme"], "domains": ["acme.com"], "emails": []}]}
-        own = [{"client_slug": "cfg:" + c["name"], "client_name": c["name"], "entry_type": "client",
+        # Anyone: "clients": {"list": [{"name": "Acme", "aliases": ["acme"], "domains": ["acme.com"], "emails": [],
+        #                               "kind": "lead" (sales until "client_since": "YYYY-MM-DD"; default a client)}]}
+        own = [{"client_slug": "cfg:" + c["name"], "client_name": c["name"],
+                "entry_type": "lead" if c.get("kind") == "lead" else "client", "client_since": c.get("client_since"),
                 "domains": c.get("domains", []), "contact_emails": c.get("emails", [])}
                for c in cfg.get("list", []) if isinstance(c, dict) and c.get("name")]
         self.cfg = {**cfg, "aliases": {**cfg.get("aliases", {}),
@@ -898,6 +918,19 @@ class Clients:
             name = next((names_cfg[s] for s in slugs if s in names_cfg), None) or (_segments(lead.get("client_name", "")) or ["?"])[0]
             idx = len(self.names)
             self.names.append(name)
+            # A lead file decides lead or client (and since when); without one the registry's entry type does.
+            is_client, since = False, []
+            for m in members:
+                slug = m.get("client_slug", "")
+                if slug and (LEAD_DIR / f"{slug}.md").is_file():
+                    signed, day = signed_on(slug)
+                else:
+                    signed, day = m.get("entry_type") == "client", _iso_day(m.get("client_since"))
+                is_client = is_client or signed or day is not None
+                since += [day] if day else []
+            was, was_since = self.kind_of.get(name, (False, None))
+            since += [was_since] if was_since else []
+            self.kind_of[name] = (was or is_client, min(since) if since else None)
             aliases = {name}
             for m in members:
                 for e in m.get("contact_emails", []):
@@ -956,6 +989,54 @@ class Clients:
         if others and all(g in self.team_emails or g.rsplit("@", 1)[-1] in self.team_domains for g in others):
             return self.team
         return self._text(title)
+
+    def kind(self, name: str, d: date) -> str:
+        """What time on this client was on day d: 'sales' (a lead, or a client before the day it signed, so the
+        meetings that won it stay sales), 'client', 'team' or '' (no client)."""
+        if not name:
+            return ""
+        if name == self.team:
+            return "team"
+        is_client, since = self.kind_of.get(name, (True, None))
+        return "sales" if not is_client or (since is not None and d < since) else "client"
+
+
+YES_STAGES = ("signed", "won")
+EX_CLIENT_STAGES = ("closed_not_invoiced", "closed_friendly")
+_LEAD_CACHE: dict[str, tuple[float, tuple[bool, date | None]]] = {}
+
+
+def _iso_day(v) -> date | None:
+    try:
+        return date.fromisoformat(str(v)[:10]) if v else None
+    except ValueError:
+        return None
+
+
+def signed_on(slug: str) -> tuple[bool, date | None]:
+    """(a client?, the first day its stage reached signed or won) from lead_md/<slug>.md, kept per file until it
+    changes. A lead that never signed is sales however old; a client with no dated yes is a client all along."""
+    path = LEAD_DIR / f"{slug}.md"
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return False, None
+    hit = _LEAD_CACHE.get(slug)
+    if hit and hit[0] == mtime:
+        return hit[1]
+    res: tuple[bool, date | None] = (False, None)
+    try:
+        if str(ROOT / "scripts") not in sys.path:
+            sys.path.insert(0, str(ROOT / "scripts"))
+        from lead_schema import normalize_stage, parse_frontmatter
+        fm = parse_frontmatter(path.read_text())
+        days = [d for d in (_iso_day(h.get("date")) for h in fm.get("stage_history") or []
+                            if isinstance(h, dict) and normalize_stage(h.get("stage")) in YES_STAGES) if d]
+        res = (bool(days) or normalize_stage(fm.get("stage")) in YES_STAGES + EX_CLIENT_STAGES, min(days) if days else None)
+    except Exception as e:  # a broken lead file counts as a lead, never stops the page
+        log(f"lead file {slug}: {type(e).__name__}: {e}")
+    _LEAD_CACHE[slug] = (mtime, res)
+    return res
 
 
 # ---------------------------------------------------------------- Claude Code session names
@@ -1045,18 +1126,78 @@ def _meeting_hint(app: str, bundle: str, host: str, cats: Categories) -> bool:
     return bundle in CHROMIUM or (cats.meetings is not None and cats.of(app, bundle, "") == cats.meetings)
 
 
+def focus_stats(segs: list[dict], cats: Categories, places: list[dict] | None = None) -> dict:
+    """How a day's solo time went (everything but meetings and calls). switches = landing on another app, site or
+    window of a 'window_switch_apps' app (a Claude Code chat in VS Code) for 'switch_min_seconds' or more
+    (flicking through tabs is one switch, not ten) with under 3 minutes between, per hour of the day in sw_h (solo seconds per hour in solo_h). A focus block = 'block_minutes' or more on one
+    category, where visits elsewhere under 2 minutes do not end it; blocks = [start, end, category, seconds,
+    short visits], intr = what those visits were [label, category, n]. Switches are counted on 'places' (segs
+    split per window of a window_switch app) when given; blocks always on segs, so a chat change never moves one."""
+    solo = [g for g in segs if g["cat"] != cats.meetings and g["e"] > g["s"]]
+    sw_h, solo_h = [0] * 24, [0] * 24
+    switches, prev = 0, None
+    for g in (solo if places is None else [g for g in places if g["cat"] != cats.meetings and g["e"] > g["s"]]):
+        a = g["s"]
+        while a < g["e"]:
+            h = min(23, int(a // 3600))
+            b = g["e"] if h == 23 else min(g["e"], (h + 1) * 3600)
+            solo_h[h] += b - a
+            a = b
+        if g["e"] - g["s"] < cats.switch_min:
+            continue
+        if prev is not None and g.get("place", g["label"]) != prev.get("place", prev["label"]) and g["s"] - prev["e"] <= BREAK_GAP:
+            switches += 1
+            sw_h[min(23, int(g["s"] // 3600))] += 1
+        prev = g
+    blocks: list[dict] = []
+    cur: dict | None = None
+    for g in solo:
+        d = g["e"] - g["s"]
+        if cur is not None and g["s"] - cur["last"] <= BREAK_GAP:
+            if g["cat"] == cur["cat"]:  # back on the block's category: the visits in between were detours
+                cur["on"] += cur["pend"] + d
+                cur["intr"].update(cur["pend_lab"])
+                cur["pend"], cur["pend_lab"], cur["e"], cur["last"] = 0.0, [], g["e"], g["e"]
+                continue
+            if cur["pend"] + d < DETOUR:
+                cur["pend"] += d
+                cur["pend_lab"] += [(g["label"], g["cat"])] if d >= cats.switch_min else []
+                cur["last"] = g["e"]
+                continue
+        if cur is not None and cur["e"] - cur["s"] >= cats.focus_block:
+            blocks.append(cur)
+        cur = {"cat": g["cat"], "s": g["s"], "e": g["e"], "last": g["e"], "on": d, "pend": 0.0, "pend_lab": [], "intr": Counter()}
+    if cur is not None and cur["e"] - cur["s"] >= cats.focus_block:
+        blocks.append(cur)
+    intr: Counter = Counter()
+    for b in blocks:
+        intr.update(b["intr"])
+    return {"solo": round(sum(solo_h)), "focus": round(sum(b["on"] for b in blocks)), "switches": switches,
+            "sw_h": sw_h, "solo_h": [round(x) for x in solo_h],
+            "blocks": [[round(b["s"]), round(b["e"]), b["cat"], round(b["on"]), sum(b["intr"].values())] for b in blocks],
+            "intr": [[lab, cat, n] for (lab, cat), n in intr.most_common(12)]}
+
+
 def summarize(ps: list[tuple], cats: Categories, with_segs: bool = False) -> dict:
-    """Add up pieces (a, b, app, host, path, title, cat, client, call, meeting): categories, clients,
-    sites with their pages, apps with their windows, and (for a day) the stretches for the timeline/log."""
+    """Add up pieces (a, b, app, host, path, title, cat, client, call, meeting, kind): categories, clients,
+    sites with their pages, apps with their windows, time per kind of client (kinds: sales, client, team,
+    prospecting = no client in the sales category, '' = no client; [all, in meetings]) and, for a day, the
+    stretches for the timeline/log and the focus numbers."""
     segs: list[dict] = []
+    places: list[dict] = []  # like segs, but a window of a window_switch app (a Claude chat) is a place of its own
     sites: dict[str, dict] = {}
     apps: dict[str, list] = {}
     clients: dict[str, list] = {}
+    kinds: dict[str, list] = defaultdict(lambda: [0.0, 0.0])
     cat_total = [0.0] * (cats.other + 1)
-    for a, b, app, host, path, title, cat, client, call, m in ps:
+    for a, b, app, host, path, title, cat, client, call, m, kind in ps:
         secs = b - a
         label = host or app
         cat_total[cat] += secs
+        k = kinds["prospecting" if not kind and cat == cats.sales else kind]
+        k[0] += secs
+        if cat == cats.meetings:
+            k[1] += secs
         entry = apps.setdefault(app, [0.0, Counter()])
         entry[0] += secs
         if title and not host:  # window titles; a browser's pages live under sites
@@ -1073,6 +1214,12 @@ def summarize(ps: list[tuple], cats: Categories, with_segs: bool = False) -> dic
         what = m["title"] if m is not None and cat == cats.meetings else (title or (host + path if host else app))
         c[1][(what, "meeting" if m is not None and cat == cats.meetings else label)] += secs
         if with_segs:
+            place = f"{label}\x00{title}" if title and not host and app in cats.window_switch else label
+            f = places[-1] if places else None
+            if f and f["place"] == place and f["cat"] == cat and a - f["e"] <= MERGE_GAP:
+                f["e"] = max(f["e"], b)
+            else:
+                places.append({"s": a, "e": b, "label": label, "place": place, "cat": cat})
             g = segs[-1] if segs else None
             if g and g["label"] == label and g["cat"] == cat and a - g["e"] <= MERGE_GAP:
                 g["e"] = max(g["e"], b)
@@ -1093,8 +1240,10 @@ def summarize(ps: list[tuple], cats: Categories, with_segs: bool = False) -> dic
                   for host, v in sorted(sites.items(), key=lambda kv: -kv[1]["secs"])[:40]],
         "apps": [[app, round(v[0]), [[t, round(s)] for t, s in v[1].most_common(10) if s >= 1]]
                  for app, v in sorted(apps.items(), key=lambda kv: -kv[1][0])[:15]],
+        "kinds": {k: [round(v[0]), round(v[1])] for k, v in kinds.items()},
     }
     if with_segs:
+        out["focus"] = focus_stats(segs, cats, places)
         out["segs"] = [[round(g["s"]), round(g["e"]), g["label"], g["cat"], g["titles"].most_common(1)[0][0], g["app"],
                         [[t, round(s)] for t, s in g["titles"].most_common(5) if t] if len(g["titles"]) > 1 else [],
                         g["clients"].most_common(1)[0][0], g["call"]]
@@ -1154,7 +1303,7 @@ def build(rows: list[tuple], first: date, last: date, cats: Categories, clients:
             t0, t1 = day_start(d), day_start(d + timedelta(days=1))
             x, y = max(a, t0), min(b, t1)
             if y > x and d >= first:
-                pieces[d].append((x - t0, y - t0, app, host, path, title, cat, client, call, m))
+                pieces[d].append((x - t0, y - t0, app, host, path, title, cat, client, call, m, clients.kind(client, d)))
             if b <= t1:
                 break
             d += timedelta(days=1)
@@ -1167,14 +1316,14 @@ def build(rows: list[tuple], first: date, last: date, cats: Categories, clients:
         return "upcoming" if m["s"] > clock else ("booked" if m["e"] > clock else "missed")
 
     def meeting_rows(d: date, ps: list[tuple]) -> list[list]:
-        """[day, start, end, name, client, booked secs, meeting secs, kind] for booked meetings starting
-        this day and for calls nobody booked (a run of mic time with a gap under 2 minutes)."""
+        """[day, start, end, name, client, booked secs, meeting secs, kind, sales/client/team/''] for booked
+        meetings starting this day and for calls nobody booked (a run of mic time with a gap under 2 minutes)."""
         t0, t1, key = day_start(d), day_start(d + timedelta(days=1)), d.isoformat()
         out = [[key, round(m["s"] - t0), round(m["e"] - t0), m["title"], m["client"], round(m["e"] - m["s"]),
-                round(m["tracked"]), kind_of(m)]
+                round(m["tracked"]), kind_of(m), clients.kind(m["client"], d)]
                for m in meetings if t0 <= m["s"] < t1]
         runs: list[list] = []
-        for a, b, app, host, path, title, cat, client, call, m in ps:
+        for a, b, app, host, path, title, cat, client, call, m, _kind in ps:
             if not call or m is not None:
                 continue
             r = runs[-1] if runs else None
@@ -1184,7 +1333,8 @@ def build(rows: list[tuple], first: date, last: date, cats: Categories, clients:
                 r[4][client] += b - a
             else:
                 runs.append([a, b, b - a, call, Counter({client: b - a})])
-        out += [[key, round(a), round(b), f"Call ({call})", c.most_common(1)[0][0], 0, round(secs), "call"]
+        out += [[key, round(a), round(b), f"Call ({call})", c.most_common(1)[0][0], 0, round(secs), "call",
+                 clients.kind(c.most_common(1)[0][0], d)]
                 for a, b, secs, call, c in runs if secs >= 60]
         return sorted(out, key=lambda r: r[1])
 
@@ -1226,10 +1376,15 @@ def hhmm(ts: float) -> tuple[str, str]:
     return datetime.fromtimestamp(ts).strftime("%H:%M"), datetime.fromtimestamp(ts, DK).strftime("%H:%M")
 
 
-def report(con: sqlite3.Connection, cats: Categories, end: date, ndays: int, top: int, pages: bool) -> None:
-    start = end - timedelta(days=ndays - 1)
+KIND_NAMES = {"sales": "Leads (sales)", "prospecting": "Sales category, no lead named", "client": "Existing clients",
+              "team": "Team", "": "No client"}
+
+
+def report(con: sqlite3.Connection, cats: Categories, start: date, end: date, top: int, pages: bool) -> None:
+    ndays = (end - start).days + 1
     rows = load_rows(con, day_start(start), day_start(end + timedelta(days=1)))
-    built = build(rows, start, end, cats, Clients(cats.client_cfg), load_meetings(), SessionTitles(day_start(start) - 86400))
+    clients = Clients(cats.client_cfg)
+    built = build(rows, start, end, cats, clients, load_meetings(), SessionTitles(day_start(start) - 86400))
     days, span = built["days"], built["span"]
     names = cats.names + ["Other"]
     total = span["total"]
@@ -1263,13 +1418,51 @@ def report(con: sqlite3.Connection, cats: Categories, end: date, ndays: int, top
         print(f"\nMeetings: {fmt_dur(span['cats'][cats.meetings])} in meetings and calls; "
               f"{fmt_dur(sum(r[5] for r in booked))} booked on the calendar ({len(booked)} meetings, "
               f"{sum(1 for r in booked if r[7] == 'missed')} not at this Mac)")
-        for key, a, b, title, client, booked_s, secs, kind in ms:
+        for key, a, b, title, client, booked_s, secs, kind, who in (ms if ndays <= 31 else []):
             t0 = day_start(date.fromisoformat(key))
             (al, adk), _ = hhmm(t0 + a), hhmm(t0 + b)
             when = f"{date.fromisoformat(key):%a %d} {al} (DK {adk})"
             b_txt = fmt_dur(booked_s) if booked_s else "-"
             s_txt = fmt_dur(secs) if secs else {"missed": "not at this Mac", "upcoming": "later"}.get(kind, "0m")
-            print(f"  {when:<22} {title[:46]:<46} {(client or '-')[:22]:<22} booked {b_txt:>7}  in it {s_txt}")
+            print(f"  {when:<22} {title[:46]:<46} {(client or '-')[:22]:<22} {who or '-':<7} booked {b_txt:>7}  in it {s_txt}")
+
+    kinds = span["kinds"]
+    if kinds.get("sales") or kinds.get("client"):
+        held = [r for r in ms if r[6]]
+        print("\nSales and clients (a client counts as a lead until the day it signed or was won):")
+        for k in ("sales", "prospecting", "client", "team", ""):
+            secs, meet = kinds.get(k, [0, 0])
+            if secs:
+                n = sum(1 for r in held if r[8] == k)
+                m_txt = f"  meetings {fmt_dur(meet)} ({n})" if meet else ""
+                print(f"  {KIND_NAMES[k]:<34}{fmt_dur(secs):>9}  {secs / total:>4.0%}{m_txt}")
+        if cats.sales_target:
+            lo, hi = cats.sales_target
+            sales = kinds.get("sales", [0, 0])[0] + kinds.get("prospecting", [0, 0])[0]
+            share = sales / total * 100
+            gap = (f"under: {fmt_dur(lo / 100 * total - sales)} more of this time on sales would reach {lo:g}%" if share < lo
+                   else "above it" if share > hi else "on target")
+            print(f"  Sales {share:.0f}% against a target of {lo:g}-{hi:g}%: {gap}")
+
+    fs = [v["focus"] for v in days.values() if v.get("focus")]
+    solo = sum(f["solo"] for f in fs)
+    if solo:
+        blocks = [(d, b) for d, v in days.items() for b in v["focus"]["blocks"]]
+        focus = sum(f["focus"] for f in fs)
+        switches = sum(f["switches"] for f in fs)
+        print(f"\nFocus (solo work: {fmt_dur(solo)}, meetings and calls left out):")
+        print(f"  In blocks of {cats.focus_block // 60}+ min on one thing: {fmt_dur(focus)} ({focus / solo:.0%}), {len(blocks)} blocks")
+        if blocks:
+            d, (s, e, cat, on, n) = max(blocks, key=lambda x: x[1][3])
+            print(f"  Longest: {fmt_dur(on)} {names[cat]}, {d:%a %d %b} {hhmm(day_start(d) + s)[0]} (DK {hhmm(day_start(d) + s)[1]})")
+        print(f"  Switches between apps, sites and Claude chats: {switches}, {switches / (solo / 3600):.0f} per hour")
+        intr: Counter = Counter()
+        for f in fs:
+            for lab, cat, n in f["intr"]:
+                if cat in cats.interrupters:
+                    intr[lab] += n
+        if intr:
+            print("  Short visits that broke into focus blocks: " + ", ".join(f"{lab} {n}" for lab, n in intr.most_common(5)))
 
     print("\nBy client:")
     for name, secs, items in span["clients"][:top]:
@@ -1335,23 +1528,69 @@ def page_images() -> tuple[str, str]:
         return "", ""
 
 
+def slim_day(day: dict) -> dict:
+    """A day older than the page's detail window: every total stays, the timeline/log stretches go and the
+    lists under clients, sites and apps get shorter, so a year of days still fits on the page."""
+    out = {k: v for k, v in day.items() if k != "segs"}
+    out["clients"] = [[n, s, items[:5]] for n, s, items in day["clients"]]
+    out["sites"] = [[h, s, c, pgs[:5]] for h, s, c, pgs in day["sites"][:15]]
+    out["apps"] = [[a, s, wins[:5]] for a, s, wins in day["apps"][:10]]
+    return out
+
+
+_OLD_DAYS: dict = {"key": None, "days": {}}
+
+
+def old_days(con: sqlite3.Connection, cats: Categories, clients: Clients, meetings: list[dict], first: date,
+             last: date) -> dict[date, dict]:
+    """Slim days from the first tracked day up to 'last' (the day before the detail window). A closed day only
+    changes with the settings, the client list or the calendar, so the running loop keeps them between rebuilds
+    and only adds the day that just left the window."""
+    if last < first:
+        return {}
+    cut = day_start(last + timedelta(days=1))
+    key = hashlib.sha256(json.dumps([CATEGORIES_PATH.stat().st_mtime, day_hm(), sorted(clients.kind_of.items(), key=str),
+                                     [m for m in meetings if m["s"] < cut]], default=str, sort_keys=True).encode()).hexdigest()
+    if _OLD_DAYS["key"] != key:
+        _OLD_DAYS.update(key=key, days={})
+    have = _OLD_DAYS["days"]
+    d = first
+    while d <= last:
+        if d in have:
+            d += timedelta(days=1)
+            continue
+        e = d
+        while e + timedelta(days=1) <= last and e + timedelta(days=1) not in have:
+            e += timedelta(days=1)
+        built = build(load_rows(con, day_start(d), day_start(e + timedelta(days=1))), d, e, cats, clients, meetings,
+                      SessionTitles(day_start(d) - 86400))
+        have.update({k: slim_day(v) for k, v in built["days"].items()})
+        d = e + timedelta(days=1)
+    return {k: v for k, v in have.items() if first <= k <= last}
+
+
 def build_page(con: sqlite3.Connection, cats: Categories) -> Path:
     today = logical_today()
-    start = max(today - timedelta(days=PAGE_DAYS - 1), first_day(con) or today)
+    first = first_day(con) or today
+    start = max(today - timedelta(days=PAGE_DAYS - 1), first)
     rows = load_rows(con, day_start(start), time.time() + 60)
     clients = Clients(cats.client_cfg)
-    built = build(rows, start, today, cats, clients, load_meetings(), SessionTitles(day_start(start) - 86400))
-    days = built["days"]
+    meetings = load_meetings()
+    days = old_days(con, cats, clients, meetings, first, start - timedelta(days=1))
+    days.update(build(rows, start, today, cats, clients, meetings, SessionTitles(day_start(start) - 86400))["days"])
     data = {
         "generated": time.time(),
         "today": today.isoformat(),
         "categories": cats.names,
         "meetings_cat": cats.meetings,
+        "sales_cat": cats.sales,
+        "sales_target": cats.sales_target,
+        "interrupters": cats.interrupters,
+        "focus_block": cats.focus_block,
         "team": clients.team,
-        "order": [d.isoformat() for d in days],
-        "days": {d.isoformat(): v for d, v in days.items()},
-        "worder": sorted(built["weeks"]),
-        "weeks": built["weeks"],
+        "detail_from": start.isoformat(),
+        "order": [d.isoformat() for d in sorted(days)],
+        "days": {d.isoformat(): v for d, v in sorted(days.items())},
     }
     logo, icon = page_images()
     payload = json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
@@ -1415,7 +1654,7 @@ def build_widget(con: sqlite3.Connection, cats: Categories) -> Path:
         "now": cur,
         "day": {"total": day["total"], "first": t0 + day["first"], "cats": day["cats"], "blocks": blocks,
                 "clients": [[n, secs] for n, secs, _ in named[:6]], "no_client": sum(c[1] for c in day["clients"] if not c[0]),
-                "meetings": [[t0 + a, t0 + b, title, client, booked, secs, kind] for _k, a, b, title, client, booked, secs, kind in day["meetings"]]},
+                "meetings": [[t0 + a, t0 + b, title, client, booked, secs, kind] for _k, a, b, title, client, booked, secs, kind, *_ in day["meetings"]]},
         "meeting_now": meeting_now, "next_meeting": next_meeting,
         "week": {"key": week_key(today), "total": week["total"], "meet": week["cats"][meet_i] if meet_i is not None else 0,
                  "client_pct": round(week_named / week["total"] * 100) if week["total"] else 0,
@@ -1576,6 +1815,7 @@ PAGE_HTML = r"""<!doctype html>
 :root[data-theme="dark"]{--ground:#10151d;--card:#19202b;--ink:#EEF1F6;--muted:#C2CBD9;--faint:#9AA6B8;--line:#2A3446;
 --track:#232c3b;--neutral:#9AA6B8;--c0:#3987e5;--c1:#d95926;--c2:#199e70;--c3:#c98500;--c4:#d55181;--c5:#008300;--c6:#9085e9;--c7:#e66767;--cx:#6b6a65}
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 body{margin:0;background:var(--ground);color:var(--ink);font:15px/1.5 Poppins,-apple-system,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
 .bar{background:var(--navy);color:#fff}
 .bar .in{max-width:1080px;margin:0 auto;padding:14px 24px;display:flex;align-items:center;gap:12px}
@@ -1650,24 +1890,48 @@ td.t{color:var(--muted);max-width:380px;overflow:hidden;text-overflow:ellipsis;w
 td.faint{color:var(--faint)}
 #meetings td.t{max-width:300px}
 .tip{position:fixed;z-index:9;pointer-events:none;background:var(--navy);color:#fff;font-size:12.5px;line-height:1.5;padding:8px 11px;border-radius:8px;white-space:pre-line;max-width:420px;box-shadow:0 4px 18px rgba(0,0,0,.25)}
+.rangebar{display:flex;flex-wrap:wrap;gap:8px 10px;align-items:center;margin:-8px 0 16px;font-size:13px;color:var(--muted)}
+.rangebar input{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;height:34px;padding:0 8px;font:inherit;margin-left:6px}
+.chip{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:999px;height:30px;padding:0 12px;font:inherit;font-size:13px;cursor:pointer}
+.chip:hover{border-color:var(--faint)}
+.sub2{font-size:12.5px;color:var(--faint);margin:12px 0 2px;font-weight:500}
+.mini{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px}
+.mini .m{background:var(--ground);border-radius:10px;padding:10px 12px;min-width:0}
+.mini .k{color:var(--faint);font-size:12.5px}.mini .v{font-size:19px;font-weight:600;line-height:1.3}.mini .s{color:var(--muted);font-size:12.5px}
+ul.fb{margin:4px 0 0;padding-left:18px;font-size:14px}ul.fb li{margin:5px 0}
+.fine{color:var(--faint);font-size:12px;margin:12px 0 0;line-height:1.5}
+.gtrk{position:relative;height:12px;border-radius:6px;background:var(--ground);margin:12px 0 4px;overflow:hidden}
+.gfill{position:absolute;left:0;top:0;bottom:0;background:var(--lime);border-radius:6px}
+.gband{position:absolute;top:0;bottom:0;border-left:2px solid var(--ink);border-right:2px solid var(--ink);background:color-mix(in srgb,var(--ink) 12%,transparent)}
+.gscale{position:relative;height:18px;margin-bottom:4px;font-size:12px;color:var(--faint)}.gscale span{position:absolute;white-space:nowrap}
+.gapn{font-weight:500}
+:root{color-scheme:light dark}:root[data-theme="light"]{color-scheme:light}:root[data-theme="dark"]{color-scheme:dark}
 @media (max-width:760px){.tiles{grid-template-columns:1fr 1fr}.grid2{grid-template-columns:1fr}.wrap,.bar .in{padding-left:16px;padding-right:16px}
 .row{grid-template-columns:minmax(90px,130px) 1fr 64px}.row .pct{display:none}.hero h1{min-width:0;font-size:21px}td.t{max-width:160px}.bar .when{display:none}
-.card{padding:16px}.cols{gap:2px}.trend{gap:2px}.tday .tot{display:none}.tday .lbl,.col .lbl{font-size:10px}}
+.card{padding:16px}.cols{gap:2px}.trend{gap:2px}.tday .tot{display:none}.tday .lbl,.col .lbl{font-size:10px}.mini{grid-template-columns:1fr}}
 </style></head>
 <body>
 <header class="bar"><div class="in">%%LOGO%%<span class="name">RM Activity</span><span class="when" id="when"></span></div></header>
 <main class="wrap">
   <section class="hero">
-    <div class="modes" id="modes"><button data-m="day">Day</button><button data-m="week">Week</button></div>
+    <div class="modes" id="modes"><button data-m="day">Day</button><button data-m="week">Week</button><button data-m="month">Month</button><button data-m="quarter">Quarter</button><button data-m="range">Range</button></div>
     <button class="nav" id="prev" aria-label="Previous">&#8249;</button>
     <h1 id="title"></h1>
     <button class="nav" id="next" aria-label="Next">&#8250;</button>
     <button class="nav" id="today">Today</button>
   </section>
-  <p class="sub">Times are this Mac's clock; hover anything for DK time. Arrow keys move between days or weeks, D and W switch view.</p>
+  <p class="sub">Times are this Mac's clock; hover anything for DK time. Arrow keys move back and forward; D, W, M, Q and R switch view.</p>
+  <section class="rangebar" id="rangebar" hidden>
+    <label>From<input type="date" id="rfrom"></label><label>To<input type="date" id="rto"></label>
+    <button class="chip" data-r="7">Last 7 days</button><button class="chip" data-r="30">Last 30 days</button><button class="chip" data-r="90">Last 90 days</button><button class="chip" data-r="year">This year</button><button class="chip" data-r="all">Everything</button>
+  </section>
   <section class="tiles" id="tiles"></section>
   <section class="card" id="daycard"><h2>Your day</h2><div class="legend" id="legend"></div><div id="timeline"></div><div id="hours"></div></section>
-  <section class="card" id="weekcard"><h2>Per day <span class="pct">(click a day to open it)</span></h2><div class="legend" id="wlegend"></div><div id="weekdays"></div></section>
+  <section class="card" id="weekcard"><h2><span id="perdaytitle">Per day</span> <span class="pct">(click one to open it)</span></h2><div class="legend" id="wlegend"></div><div id="weekdays"></div></section>
+  <div class="grid2">
+    <section class="card" id="salescard"><h2>Sales and clients</h2><div id="sales"></div></section>
+    <section class="card"><h2>Focus</h2><div id="focus"></div></section>
+  </div>
   <div class="grid2">
     <section class="card"><h2>By category</h2><div id="cats"></div></section>
     <section class="card"><h2>By client <span class="pct">(click a client for what it was)</span></h2><div id="clients"></div></section>
@@ -1683,9 +1947,11 @@ td.faint{color:var(--faint)}
     <div style="overflow-x:auto"><table id="log"></table></div></section>
   <p class="foot">Meetings and calls: while an app records from the microphone (Meet in Chrome, Zoom, WhatsApp, a phone call through the Mac) the time counts as a meeting whatever window is in front, and listening without touching the keyboard still counts. Dictation and screen recording are not calls. Booked meetings come from your calendar (events with at least one other guest); before 9 November there was no microphone data, so a booked meeting counts when its slot shows the meeting tab, a meeting app or Meet's picture-in-picture window for 2 minutes or more.
   Clients: a meeting goes by its guests' mail addresses, anything else by a client's name or domain in the page title, address or window title (your client list in the settings file). Claude Code sessions show their full name, not the shortened tab name.
+  Sales and clients: a lead's time is sales; a client's time is client work from the day its stage reached signed or won (the lead file), so the meetings that won a client stay sales. Time in the sales category with no lead named (LinkedIn, Sales Coach) counts as sales too.
+  Focus: solo work only (meetings and calls left out). A switch is landing on another app, site or Claude chat for 10 seconds or more; a focus block is 25 minutes or more on one category, where visits elsewhere under 2 minutes do not end it.
   Incognito windows are never recorded. Safari counts as app time only, because a private Safari window cannot be told apart from a normal one.
-  The clock stops after 3 minutes without keyboard or mouse (90 minutes in meetings, calls and video), and when the screen locks or the Mac sleeps.
-  Data stays on this Mac, in %%DATADIR%%. Categories, calls and clients: %%SETTINGS%%. Terminal summary: activity_tracker.py report --week</p>
+  The clock stops after 3 minutes without keyboard or mouse (90 minutes in meetings, calls and video), and when the screen locks or the Mac sleeps. The timeline and the log are kept for the last 31 days; every total reaches back to the first day.
+  Data stays on this Mac, in %%DATADIR%%. Categories, calls and clients: %%SETTINGS%%. Terminal summary: activity_tracker.py report --week (or --month, --quarter, --from YYYY-MM-DD)</p>
 </main>
 <div class="tip" id="tip" hidden></div>
 <script id="data" type="application/json">%%DATA%%</script>
@@ -1710,15 +1976,115 @@ function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.
 function sw(i) { const s = el('span', 'sw'); s.style.background = color(i); return s; }
 const dayName = key => new Date(key + 'T12:00:00').toLocaleDateString('en-GB', {weekday: 'long', day: 'numeric', month: 'long'});
 const shortDay = key => new Date(key + 'T12:00:00').toLocaleDateString('en-GB', {weekday: 'short', day: 'numeric', month: 'short'});
+const monthShort = key => new Date(key + 'T12:00:00').toLocaleDateString('en-GB', {month: 'short'});
 const clientName = c => c || 'No client match';
+const addDays = (key, n) => { const d = new Date(key + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+const weekday = key => (new Date(key + 'T00:00:00Z').getUTCDay() + 6) % 7;
+const pct = (a, b) => b ? Math.round(a / b * 100) : 0;
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+const FIRST = D.order[0], LAST = D.order[D.order.length - 1];
 
-let mode = 'day', cur = -1, wcur = -1;
-const h0 = location.hash.slice(1);
-if (h0.startsWith('w')) { mode = 'week'; wcur = D.worder.indexOf(h0.slice(1)); } else cur = D.order.indexOf(h0);
+// ---------------------------------------------------------------- weeks, months, quarters
+function isoWeek(key) {  // the Thursday of a Monday-Sunday week names it
+  const d = new Date(key + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() - weekday(key) + 3);
+  const y = d.getUTCFullYear();
+  return `${y}-W${pad(Math.floor((d - Date.UTC(y, 0, 1)) / 864e5 / 7) + 1)}`;
+}
+const UNIT_OF = {week: isoWeek, month: k => k.slice(0, 7), quarter: k => `${k.slice(0, 4)}-Q${Math.floor((+k.slice(5, 7) - 1) / 3) + 1}`};
+const PERIODS = {};
+for (const u of Object.keys(UNIT_OF)) {
+  const list = [], idx = {};
+  for (const k of D.order) { const p = UNIT_OF[u](k); if (!(p in idx)) { idx[p] = list.length; list.push({key: p, days: []}); } list[idx[p]].days.push(k); }
+  PERIODS[u] = list;
+}
+function periodSpan(u, p) {  // first and last calendar day of the week, month or quarter
+  const k = p.days[0];
+  if (u === 'week') { const mon = addDays(k, -weekday(k)); return [mon, addDays(mon, 6)]; }
+  const y = +k.slice(0, 4), m = u === 'month' ? +k.slice(5, 7) : Math.floor((+k.slice(5, 7) - 1) / 3) * 3 + 1, n = m + (u === 'month' ? 1 : 3);
+  return [`${y}-${pad(m)}-01`, addDays(n > 12 ? `${y + 1}-01-01` : `${y}-${pad(n)}-01`, -1)];
+}
+function periodName(u, p) {
+  const [a, b] = periodSpan(u, p);
+  if (u === 'week') return `Week ${+p.key.split('-W')[1]}, ${shortDay(a)} to ${shortDay(b)}`;
+  if (u === 'month') return new Date(a + 'T12:00:00').toLocaleDateString('en-GB', {month: 'long', year: 'numeric'});
+  return `Q${p.key.slice(-1)} ${a.slice(0, 4)}, ${monthShort(a)} to ${monthShort(b)}`;
+}
+
+// ---------------------------------------------------------------- adding days up
+const MERGED = new Map();
+const topList = (map, n) => [...map].sort((a, b) => b[1] - a[1]).slice(0, n);
+function merge(keys) {
+  const id = `${keys[0]}_${keys[keys.length - 1]}`;
+  if (MERGED.has(id)) return MERGED.get(id);
+  const o = {total: 0, cats: CATS.map(() => 0), days: keys, active_days: 0, meetings: [], kinds: {}};
+  const cl = new Map(), st = new Map(), ap = new Map();
+  for (const k of keys) {
+    const d = D.days[k];
+    o.total += d.total; if (d.total) o.active_days++;
+    d.cats.forEach((v, i) => { o.cats[i] += v; });
+    for (const [name, secs, items] of d.clients) {
+      let c = cl.get(name); if (!c) cl.set(name, c = {secs: 0, items: new Map()});
+      c.secs += secs;
+      for (const [w, where, s] of items) { const ik = w + '\u0001' + where; c.items.set(ik, (c.items.get(ik) || 0) + s); }
+    }
+    for (const [host, secs, cat, pages] of d.sites) {
+      let s = st.get(host); if (!s) st.set(host, s = {secs: 0, cats: new Map(), pages: new Map()});
+      s.secs += secs; s.cats.set(cat, (s.cats.get(cat) || 0) + secs);
+      for (const [title, path, ps] of pages) {
+        let p = s.pages.get(path); if (!p) s.pages.set(path, p = {secs: 0, title, best: 0});
+        p.secs += ps; if (ps > p.best) { p.best = ps; p.title = title; }
+      }
+    }
+    for (const [app, secs, wins] of d.apps) {
+      let a = ap.get(app); if (!a) ap.set(app, a = {secs: 0, wins: new Map()});
+      a.secs += secs; for (const [t, s] of wins) a.wins.set(t, (a.wins.get(t) || 0) + s);
+    }
+    o.meetings.push(...d.meetings);
+    for (const [kk, v] of Object.entries(d.kinds || {})) { const t = o.kinds[kk] || (o.kinds[kk] = [0, 0]); t[0] += v[0]; t[1] += v[1]; }
+  }
+  o.clients = [...cl].sort((a, b) => b[1].secs - a[1].secs).map(([n, c]) => [n, c.secs, topList(c.items, 10).map(([ik, s]) => [...ik.split('\u0001'), s])]);
+  o.sites = [...st].sort((a, b) => b[1].secs - a[1].secs).slice(0, 40).map(([h, s]) => [h, s.secs, topList(s.cats, 1)[0][0],
+    [...s.pages].sort((a, b) => b[1].secs - a[1].secs).slice(0, 12).map(([path, p]) => [p.title, path, p.secs])]);
+  o.apps = [...ap].sort((a, b) => b[1].secs - a[1].secs).slice(0, 15).map(([a, v]) => [a, v.secs, topList(v.wins, 10)]);
+  MERGED.set(id, o);
+  return o;
+}
+function focusOf(keys) {
+  const f = {solo: 0, focus: 0, switches: 0, sw_h: new Array(24).fill(0), solo_h: new Array(24).fill(0), blocks: [], intr: []};
+  const intr = new Map();
+  for (const k of keys) {
+    const x = D.days[k].focus; if (!x) continue;
+    f.solo += x.solo; f.focus += x.focus; f.switches += x.switches;
+    x.sw_h.forEach((v, i) => { f.sw_h[i] += v; }); x.solo_h.forEach((v, i) => { f.solo_h[i] += v; });
+    for (const b of x.blocks) f.blocks.push([k, ...b]);
+    for (const [lab, cat, n] of x.intr) { const name = prettyLabel(lab), t = intr.get(name) || [cat, 0]; t[1] += n; intr.set(name, t); }
+  }
+  f.intr = [...intr].map(([lab, [cat, n]]) => [lab, cat, n]).sort((a, b) => b[2] - a[2]);
+  return f;
+}
+const PRETTY = {'mail.google.com': 'Gmail', 'app.slack.com': 'Slack', 'web.whatsapp.com': 'WhatsApp', 'linkedin.com': 'LinkedIn',
+  'outlook.cloud.microsoft': 'Outlook', 'outlook.office.com': 'Outlook', 'outlook.office365.com': 'Outlook', 'outlook.live.com': 'Outlook',
+  'youtube.com': 'YouTube', 'facebook.com': 'Facebook', 'Microsoft Outlook': 'Outlook', 'net.whatsapp.WhatsApp': 'WhatsApp'};
+function prettyLabel(lab) { lab = lab.replace(/[‎‏]/g, '').replace(/^www\./, ''); return PRETTY[lab] || lab; }
+
+// ---------------------------------------------------------------- view state: mode + the day it is anchored on
+let mode = 'day', cur = -1, rFrom = D.order[Math.max(0, D.order.length - 30)], rTo = LAST;
+const pidx = u => Math.max(0, PERIODS[u].findIndex(p => p.days.includes(D.order[cur])));
+function rangeKeys() {
+  let [a, b] = [rFrom, rTo].sort();
+  a = a < FIRST ? FIRST : a; b = b > LAST ? LAST : b;
+  const keys = D.order.filter(k => k >= a && k <= b);
+  return keys.length ? keys : [LAST];
+}
+{
+  const h = decodeURIComponent(location.hash.slice(1)), u = {w: 'week', m: 'month', q: 'quarter'}[h[0]];
+  if (/^\d{4}-\d{2}-\d{2}$/.test(h)) cur = D.order.indexOf(h);
+  else if (u) { const p = PERIODS[u].find(p => p.key === h.slice(1)); if (p) { mode = u; cur = D.order.indexOf(p.days[p.days.length - 1]); } }
+  else if (h[0] === 'r') { const [a, b] = h.slice(1).split('_'); if (D.days[a] && D.days[b]) { mode = 'range'; rFrom = a; rTo = b; cur = D.order.indexOf(b); } }
+}
 if (cur < 0) cur = D.order.indexOf(D.today);
 if (cur < 0) cur = D.order.length - 1;
-if (wcur < 0) wcur = Math.max(0, D.worder.findIndex(k => D.weeks[k].days.includes(D.order[cur])));
-const weekOf = key => D.worder.findIndex(k => D.weeks[k].days.includes(key));
 
 function hourSpan(day) {
   const h0 = Math.floor(day.first / 3600), h1 = Math.max(h0 + 1, Math.min(24, Math.ceil(day.last / 3600)));
@@ -1726,17 +2092,25 @@ function hourSpan(day) {
 }
 
 function topCat(obj) { let top = -1; obj.cats.forEach((v, i) => { if (v && (top < 0 || v > obj.cats[top])) top = i; }); return top; }
+const kindOf = (obj, x) => (obj.kinds || {})[x] || [0, 0];
+const heldBy = (obj, x) => obj.meetings.filter(m => m[6] > 0 && (m[8] || '') === x).length;
+const hasKinds = obj => kindOf(obj, 'sales')[0] + kindOf(obj, 'client')[0] > 0;
 
-function tiles(obj, isDay, key) {
+function tiles(obj, isDay, note) {
   const box = document.getElementById('tiles'); box.replaceChildren();
   const top = topCat(obj), meet = MEET != null ? obj.cats[MEET] : 0;
   const booked = obj.meetings.filter(m => m[7] !== 'call'), bookedSecs = booked.reduce((p, m) => p + m[5], 0);
-  const items = [['Active time', obj.total ? dur(obj.total) : '0m', isDay ? (obj.total ? `${obj.segs.length} stretches` : 'Nothing recorded')
+  const items = [['Active time', obj.total ? dur(obj.total) : '0m', isDay ? (obj.total ? (obj.segs ? `${obj.segs.length} stretches` : '') : 'Nothing recorded')
                   : (obj.active_days ? `${dur(obj.total / obj.active_days)} per active day` : 'Nothing recorded')]];
   if (isDay) items.push(['First and last', obj.total ? `${tl(obj, obj.first)}-${tl(obj, obj.last)}` : '-', obj.total ? `DK ${tdk(obj, obj.first)}-${tdk(obj, obj.last)}` : '']);
-  else items.push(['Active days', `${obj.active_days} of ${obj.days.length}`, obj.days.length < 7 ? 'week so far' : '']);
-  items.push(['In meetings and calls', dur(meet), booked.length ? `${dur(bookedSecs)} booked in ${booked.length} meeting${booked.length > 1 ? 's' : ''}` : 'nothing booked']);
-  items.push(['Most time on', top >= 0 ? CATS[top] : '-', top >= 0 ? `${dur(obj.cats[top])}, ${Math.round(obj.cats[top] / obj.total * 100)}%` : '']);
+  else items.push(['Active days', `${obj.active_days} of ${obj.days.length}`, note]);
+  const split = hasKinds(obj) ? `${heldBy(obj, 'sales')} sales, ${heldBy(obj, 'client')} client` : '';
+  items.push(['In meetings and calls', dur(meet), !booked.length ? 'nothing booked' : split ? `${split} meetings, ${dur(bookedSecs)} booked` : `${dur(bookedSecs)} booked in ${plural(booked.length, 'meeting')}`]);
+  if (hasKinds(obj)) {
+    const sales = kindOf(obj, 'sales')[0] + kindOf(obj, 'prospecting')[0];
+    const tg = D.sales_target;
+    items.push(['Sales', dur(sales), tg ? `${pct(sales, obj.total)}% of your time, target ${tg[0]}-${tg[1]}%` : `${pct(sales, obj.total)}% of your time, ${plural(heldBy(obj, 'sales'), 'sales meeting')}`]);
+  } else items.push(['Most time on', top >= 0 ? CATS[top] : '-', top >= 0 ? `${dur(obj.cats[top])}, ${pct(obj.cats[top], obj.total)}%` : '']);
   for (const [k, v, s] of items) {
     const t = el('div', 'tile'); t.append(el('div', 'k', k));
     const vv = el('div', 'v', v); if (k === 'Most time on') vv.style.fontSize = '20px';
@@ -1752,6 +2126,7 @@ function legend(obj, id) {
 function timeline(day) {
   const box = document.getElementById('timeline'); box.replaceChildren();
   if (!day.total) { box.append(el('p', 'empty', 'Nothing recorded this day.')); return; }
+  if (!day.segs) { box.append(el('p', 'empty', 'The timeline and the log are kept for the last 31 days. Every total below is complete.')); return; }
   const [h0, h1] = hourSpan(day), span = (h1 - h0) * 3600, x = s => (s - h0 * 3600) / span * 100;
   const blocks = [];
   for (const [s, e, label, cat, , , , client] of day.segs) {
@@ -1779,7 +2154,7 @@ function timeline(day) {
 
 function hours(day) {
   const box = document.getElementById('hours'); box.replaceChildren();
-  if (!day.total) return;
+  if (!day.total || !day.segs) return;
   const [h0, h1] = hourSpan(day);
   const per = Array.from({length: h1 - h0}, () => new Array(CATS.length).fill(0));
   for (const [s, e, , cat] of day.segs) {
@@ -1803,14 +2178,15 @@ function hours(day) {
   box.append(wrap);
 }
 
+// cat: a category index (its colour and swatch), a CSS colour, or null (neutral)
 function barRow(name, secs, max, total, cat, tip) {
   const row = el('div', 'row'), nm = el('div', 'nm');
-  if (cat != null) nm.append(sw(cat));
+  if (typeof cat === 'number') nm.append(sw(cat));
   nm.append(el('span', '', name));
   const trk = el('div', 'trk'), b = el('div', 'b');
-  b.style.width = (secs / max * 100) + '%'; b.style.background = cat != null ? color(cat) : 'var(--neutral)';
+  b.style.width = (secs / max * 100) + '%'; b.style.background = typeof cat === 'number' ? color(cat) : cat || 'var(--neutral)';
   trk.append(b);
-  row.append(nm, trk, el('div', 'val', dur(secs)), el('div', 'pct', total ? Math.round(secs / total * 100) + '%' : ''));
+  row.append(nm, trk, el('div', 'val', dur(secs)), el('div', 'pct', total ? pct(secs, total) + '%' : ''));
   if (tip) row.dataset.tip = tip;
   return row;
 }
@@ -1821,6 +2197,95 @@ function cats(obj) {
   const idx = obj.cats.map((v, i) => i).filter(i => obj.cats[i]).sort((a, b) => obj.cats[b] - obj.cats[a]);
   const max = obj.cats[idx[0]];
   for (const i of idx) box.append(barRow(CATS[i], obj.cats[i], max, obj.total, i, `${CATS[i]}: ${dur(obj.cats[i])}`));
+}
+
+function salesCard(obj) {
+  const box = document.getElementById('sales'), card = document.getElementById('salescard'); box.replaceChildren();
+  card.hidden = !hasKinds(obj);
+  if (card.hidden) return;
+  const g = x => kindOf(obj, x), sales = g('sales')[0] + g('prospecting')[0];
+  box.append(el('p', 'note', `Sales: ${dur(sales)}, ${pct(sales, obj.total)}% of your time, with ${plural(heldBy(obj, 'sales'), 'sales meeting')}.` +
+    (g('client')[0] ? ` Existing clients: ${dur(g('client')[0])}, ${pct(g('client')[0], obj.total)}%, with ${plural(heldBy(obj, 'client'), 'meeting')}.` : '')));
+  if (D.sales_target && obj.total) box.append(...targetBar(sales, obj.total, D.sales_target));
+  const meetRows = [['sales', 'Sales'], ['client', 'Clients'], ['team', D.team], ['', 'No client']].filter(([x]) => g(x)[1]);
+  if (meetRows.length) {
+    const tot = meetRows.reduce((p, [x]) => p + g(x)[1], 0), max = Math.max(...meetRows.map(([x]) => g(x)[1]));
+    box.append(el('div', 'sub2', 'Meetings and calls'));
+    for (const [x, name] of meetRows)
+      box.append(barRow(`${name} (${heldBy(obj, x)})`, g(x)[1], max, tot, x === 'sales' ? 'var(--lime)' : null, `${name}: ${dur(g(x)[1])} in ${plural(heldBy(obj, x), 'meeting')} or calls`));
+  }
+  const allRows = [['sales', 'Leads'], ['prospecting', D.sales_cat != null ? `${CATS[D.sales_cat]}, no lead` : 'Sales, no lead'], ['client', 'Existing clients'], ['team', D.team], ['', 'No client']].filter(([x]) => g(x)[0]);
+  const max = Math.max(...allRows.map(([x]) => g(x)[0]));
+  box.append(el('div', 'sub2', 'All your time'));
+  for (const [x, name] of allRows)
+    box.append(barRow(name, g(x)[0], max, obj.total, x === 'sales' || x === 'prospecting' ? 'var(--lime)' : null, `${name}: ${dur(g(x)[0])}${g(x)[1] ? `, of which ${dur(g(x)[1])} in meetings` : ''}`));
+  box.append(el('p', 'fine', 'A client counts as a lead until the day its lead file says signed or won, so the meetings that won it stay sales. Time only counts for a lead when its page, window or meeting names it; the rest lands under No client, so the real sales share can be higher.'));
+}
+
+function targetBar(sales, total, [lo, hi]) {  // the sales share against the target band, and what closes the gap
+  const share = sales / total * 100, trk = el('div', 'gtrk'), fill = el('div', 'gfill'), band = el('div', 'gband');
+  fill.style.width = Math.min(100, share) + '%';
+  band.style.left = lo + '%'; band.style.width = (hi - lo) + '%';
+  trk.append(fill, band);
+  trk.dataset.tip = `Sales ${Math.round(share)}% of your time; the band is your ${lo}-${hi}% target`;
+  const scale = el('div', 'gscale'), mark = el('span', '', `target ${lo}-${hi}%`);
+  mark.style.left = lo + '%'; scale.append(mark);
+  const gap = share < lo ? `${Math.round(lo - share)} points under your target. Moving ${dur(lo / 100 * total - sales)} from other work to sales would have reached ${lo}%.`
+    : share > hi ? `Above your ${lo}-${hi}% target.` : `On target (${lo}-${hi}%).`;
+  return [trk, scale, el('p', share < lo ? 'note gapn' : 'note', gap)];
+}
+
+function previous(keys) {  // the stretch to compare with, and what to call it
+  const i0 = D.order.indexOf(keys[0]);
+  if (mode === 'day') return [D.order.slice(Math.max(0, i0 - 7), i0), 'the 7 days before'];
+  if (mode === 'range') return [D.order.slice(Math.max(0, i0 - keys.length), i0), `the ${keys.length} days before`];
+  const j = pidx(mode);
+  return [j > 0 ? PERIODS[mode][j - 1].days : [], `the ${mode} before`];
+}
+
+function focusCard(keys, isDay) {
+  const box = document.getElementById('focus'); box.replaceChildren();
+  const f = focusOf(keys);
+  if (f.solo < 900) { box.append(el('p', 'empty', 'Too little solo work to say anything.')); return; }
+  const rate = f.switches / (f.solo / 3600), longest = f.blocks.reduce((p, b) => !p || b[4] > p[4] ? b : p, null);
+  const mini = el('div', 'mini');
+  const item = (k, v, s, tip) => { const t = el('div', 'm'); t.append(el('div', 'k', k), el('div', 'v', v), el('div', 's', s)); if (tip) t.dataset.tip = tip; mini.append(t); };
+  item('In focus blocks', dur(f.focus), `${pct(f.focus, f.solo)}% of ${dur(f.solo)} solo work, ${plural(f.blocks.length, 'block')}`,
+    `Blocks of ${D.focus_block / 60} minutes or more on one category; visits elsewhere under 2 minutes do not end a block.`);
+  item('Switches', `${Math.round(rate)} an hour`, `${f.switches} between apps, sites and chats`, 'Landing on another app, site or Claude chat for 10 seconds or more, in solo work.');
+  const lday = longest && D.days[longest[0]];
+  item('Longest block', longest ? dur(longest[4]) : '-', longest ? `${CATS[longest[3]]}, ${isDay ? '' : shortDay(longest[0]) + ' '}${tl(lday, longest[1])}` : `none of ${D.focus_block / 60}+ minutes`,
+    longest ? `${shortDay(longest[0])}  ${range(lday, longest[1], longest[2])}\n${CATS[longest[3]]}  ${dur(longest[4])}` : '');
+  box.append(mini);
+  const lines = [], [pk, plabel] = previous(keys), p = pk.length ? focusOf(pk) : null;
+  if (p && p.solo >= 3600)
+    lines.push(`${pct(f.focus, f.solo)}% of your solo work was in focus blocks, against ${pct(p.focus, p.solo)}% ${plabel}; ` +
+      `${Math.round(rate)} switches an hour against ${Math.round(p.switches / (p.solo / 3600))}.`);
+  const intr = f.intr.filter(x => D.interrupters.includes(x[1]));
+  if (intr.length && intr[0][2] >= 5)
+    lines.push(`What broke into your blocks most: ${intr.slice(0, 3).map(([lab, , n]) => `${lab} ${plural(n, 'time')}`).join(', ')}. ` +
+      'Closing mail and chat while you work on one thing is the cheapest win.');
+  const ref = D.days[keys[keys.length - 1]], big = Math.max(...f.solo_h);
+  const hrs = f.solo_h.map((s, i) => [i, s, f.sw_h[i]]).filter(([, s]) => s >= Math.max(900 * keys.length ** 0.5, big * 0.25));
+  if (hrs.length >= 3) {
+    const r = h => h[2] / (h[1] / 3600), hr = i => `${tl(ref, i * 3600)}-${tl(ref, (i + 1) * 3600)} (DK ${tdk(ref, i * 3600)})`;
+    hrs.sort((a, b) => r(b) - r(a));
+    const hi = hrs[0], lo = hrs[hrs.length - 1];
+    lines.push(`Most scattered hour: ${hr(hi[0])}, ${Math.round(r(hi))} switches an hour. Calmest: ${hr(lo[0])}, ${Math.round(r(lo))}. Put the work that needs thinking in the calm hours.`);
+  }
+  if (lines.length) { const ul = el('ul', 'fb'); for (const l of lines) ul.append(el('li', '', l)); box.append(ul); }
+  if (isDay && f.blocks.length) {
+    box.append(el('div', 'sub2', 'Focus blocks'));
+    const list = el('div', 'pages');
+    for (const [k, s, e, cat, on, n] of f.blocks) {
+      const pg = el('div', 'pg'), t = el('div', 't'), day = D.days[k];
+      t.append(sw(cat), el('span', '', ` ${tl(day, s)}-${tl(day, e)} ${CATS[cat]}`), el('span', 'p', n ? `  ${plural(n, 'short visit')}` : ''));
+      pg.dataset.tip = `${range(day, s, e)}\n${CATS[cat]}  ${dur(on)}`;
+      pg.append(t, el('div', 'val', dur(on)));
+      list.append(pg);
+    }
+    box.append(list);
+  }
 }
 
 // A bar row that opens to a list of [main text, small text, seconds, tooltip] lines.
@@ -1847,7 +2312,7 @@ function clients(obj) {
   const items = list => list.map(([w, where, s]) => [w, where, s, `${w}\n${where}  ${dur(s)}`]);
   if (named.length) {
     const secs = named.reduce((p, c) => p + c[1], 0);
-    box.append(el('p', 'note', `${dur(secs)} (${Math.round(secs / obj.total * 100)}%) on ${named.length} client${named.length > 1 ? 's' : ''} or lead${named.length > 1 ? 's' : ''}, ${dur(obj.total - secs)} on no client.`));
+    box.append(el('p', 'note', `${dur(secs)} (${pct(secs, obj.total)}%) on ${named.length} client${named.length > 1 ? 's' : ''} or lead${named.length > 1 ? 's' : ''}, ${dur(obj.total - secs)} on no client.`));
   }
   const max = named.length ? named[0][1] : 1;
   for (const [name, secs, list] of named.slice(0, 20))
@@ -1860,26 +2325,27 @@ function clients(obj) {
   }
 }
 
+const KIND_LABEL = {sales: 'Sales', client: 'Client', team: 'Team'};
 function meetings(obj, isDay) {
   const note = document.getElementById('meetnote'), table = document.getElementById('meetings');
   table.replaceChildren();
   const ms = obj.meetings, booked = ms.filter(m => m[7] !== 'call'), missed = booked.filter(m => m[7] === 'missed').length;
   const meet = MEET != null ? obj.cats[MEET] : 0;
   note.textContent = ms.length || meet
-    ? `${dur(meet)} in meetings and calls. ${booked.length} booked meeting${booked.length === 1 ? '' : 's'} (${dur(booked.reduce((p, m) => p + m[5], 0))})` +
+    ? `${dur(meet)} in meetings and calls. ${plural(booked.length, 'booked meeting')} (${dur(booked.reduce((p, m) => p + m[5], 0))})` +
       (missed ? `, ${missed} not at this Mac (declined, moved, on the phone or did not happen).` : '.')
     : 'No meetings or calls.';
   if (!ms.length) return;
   const head = el('tr');
-  for (const h of (isDay ? [] : ['Day']).concat(['Time', 'DK', 'Meeting', 'Client', 'Booked', 'In it'])) head.append(el('th', '', h));
+  for (const h of (isDay ? [] : ['Day']).concat(['Time', 'DK', 'Meeting', 'Client', 'Kind', 'Booked', 'In it'])) head.append(el('th', '', h));
   const thead = el('thead'); thead.append(head);
   const tbody = el('tbody');
-  for (const [key, s, e, title, client, bookedS, secs, kind] of ms) {
+  for (const [key, s, e, title, client, bookedS, secs, kind, who] of ms) {
     const day = D.days[key], tr = el('tr');
     if (!isDay) tr.append(el('td', 'n', shortDay(key)));
     const t = el('td', 't', title); t.dataset.tip = title;
     tr.append(el('td', 'n', `${tl(day, s)}-${tl(day, e)}`), el('td', 'n', `${tdk(day, s)}-${tdk(day, e)}`), t,
-      el('td', 'n', client || '-'), el('td', 'n', bookedS ? dur(bookedS) : '-'),
+      el('td', 'n', client || '-'), el('td', 'n' + (who ? '' : ' faint'), KIND_LABEL[who] || '-'), el('td', 'n', bookedS ? dur(bookedS) : '-'),
       el('td', 'n' + (kind === 'missed' || kind === 'upcoming' ? ' faint' : ''), kind === 'missed' ? 'not at Mac' : kind === 'upcoming' ? 'later' : dur(secs)));
     tbody.append(tr);
   }
@@ -1904,7 +2370,7 @@ function sites(obj) {
       pages.map(([title, path, s]) => [title || path, title ? path : '', s, `${title || '(no title)'}\n${host}${path}\n${dur(s)}`])));
 }
 
-// Stacked columns: [{top, l1, l2, cats, total, sel, tipName, click}]
+// Stacked columns: [{l1, l2, cats, total, sel, tipName, click}]
 function columns(box, items, scale) {
   box.replaceChildren();
   const max = Math.max(scale, ...items.map(i => i.total));
@@ -1928,29 +2394,44 @@ function columns(box, items, scale) {
 const dayItem = (k, sel) => { const day = D.days[k], dt = new Date(k + 'T12:00:00');
   return {total: day.total, cats: day.cats, sel, tipName: dayName(k), l1: dt.toLocaleDateString('en-GB', {weekday: 'short'}), l2: String(dt.getDate()),
           click: () => { mode = 'day'; go(D.order.indexOf(k)); }}; };
+const LABELS = {week: p => ['W' + p.key.split('-W')[1], shortDay(p.days[0]).replace(/^\w+ /, '')],
+                month: p => [monthShort(p.days[0]), p.key.slice(0, 4)], quarter: p => [p.key.slice(-2), p.key.slice(0, 4)]};
+const periodItem = (u, j, sel, keys) => { const p = PERIODS[u][j], o = merge(keys || p.days), [l1, l2] = LABELS[u](p);
+  return {total: o.total, cats: o.cats, sel, tipName: periodName(u, p), l1, l2, click: () => goP(u, j)}; };
 
-function trend() {
-  const box = document.getElementById('trend');
-  if (mode === 'day') {
-    document.getElementById('trendtitle').replaceChildren(document.createTextNode('Last 14 days '), el('span', 'pct', '(click a day to open it)'));
-    let start = Math.max(0, D.order.length - 14); if (cur < start) start = cur;
-    columns(box, D.order.slice(start, start + 14).map((k, j) => dayItem(k, start + j === cur)), 3600);
-  } else {
-    document.getElementById('trendtitle').replaceChildren(document.createTextNode('Weeks '), el('span', 'pct', '(click a week to open it)'));
-    columns(box, D.worder.map((k, j) => { const w = D.weeks[k];
-      return {total: w.total, cats: w.cats, sel: j === wcur, tipName: weekName(k), l1: 'W' + k.split('-W')[1], l2: shortDay(w.days[0]).replace(/^\w+ /, ''),
-              click: () => goWeek(j)}; }), 3600 * 10);
+function perDay(keys) {
+  const box = document.getElementById('weekdays');
+  if (keys.length <= 31) {
+    document.getElementById('perdaytitle').textContent = 'Per day';
+    columns(box, keys.map(k => dayItem(k, false)), 3600 * 4);
+    return;
   }
+  document.getElementById('perdaytitle').textContent = 'Per week';
+  const groups = new Map();
+  for (const k of keys) { const w = isoWeek(k); if (!groups.has(w)) groups.set(w, []); groups.get(w).push(k); }
+  columns(box, [...groups].map(([w, ks]) => periodItem('week', PERIODS.week.findIndex(p => p.key === w), false, ks)), 3600 * 10);
 }
 
-function weekName(k) { const w = D.weeks[k]; return `Week ${+k.split('-W')[1]}, ${shortDay(w.days[0])} to ${shortDay(w.days[w.days.length - 1])}`; }
+function trend() {
+  const box = document.getElementById('trend'), title = document.getElementById('trendtitle');
+  if (mode === 'day') {
+    title.replaceChildren(document.createTextNode('Last 14 days '), el('span', 'pct', '(click a day to open it)'));
+    let start = Math.max(0, D.order.length - 14); if (cur < start) start = cur;
+    columns(box, D.order.slice(start, start + 14).map((k, j) => dayItem(k, start + j === cur)), 3600);
+    return;
+  }
+  const u = mode === 'range' ? 'week' : mode, list = PERIODS[u], sel = mode === 'range' ? -1 : pidx(u), show = {week: 26, month: 24, quarter: 12}[u];
+  let start = Math.max(0, list.length - show); if (sel >= 0 && sel < start) start = sel;
+  title.replaceChildren(document.createTextNode({week: 'Weeks ', month: 'Months ', quarter: 'Quarters '}[u]), el('span', 'pct', `(click a ${u} to open it)`));
+  columns(box, list.slice(start, start + show).map((p, j) => periodItem(u, start + j, start + j === sel)), {week: 10, month: 40, quarter: 120}[u] * 3600);
+}
 
 function logTable(day) {
   const table = document.getElementById('log'); table.replaceChildren();
   const all = document.getElementById('short').checked;
-  const rows = day.segs.filter(g => all || g[1] - g[0] >= 60);
-  document.getElementById('logcount').textContent = day.segs.length
-    ? `${rows.length} of ${day.segs.length} stretches` + (all ? '' : ' (1 minute or longer)') : '';
+  const segs = day.segs || [], rows = segs.filter(g => all || g[1] - g[0] >= 60);
+  document.getElementById('logcount').textContent = segs.length
+    ? `${rows.length} of ${segs.length} stretches` + (all ? '' : ' (1 minute or longer)') : '';
   if (!rows.length) return;
   const head = el('tr'); for (const h of ['Time', 'DK', 'Length', 'Site or app', 'Page or window', 'Client', 'Category']) head.append(el('th', '', h));
   const thead = el('thead'); thead.append(head);
@@ -1969,57 +2450,91 @@ function logTable(day) {
 
 function go(i) {
   if (i < 0 || i >= D.order.length) return;
-  cur = i; wcur = Math.max(0, weekOf(D.order[cur])); render();
+  cur = i; render();
 }
-function goWeek(j) {
-  if (j < 0 || j >= D.worder.length) return;
-  mode = 'week'; wcur = j; render();
+function goP(u, j) {  // open a week, month or quarter; the day view then opens on its last day
+  if (j < 0 || j >= PERIODS[u].length) return;
+  const p = PERIODS[u][j]; mode = u; cur = D.order.indexOf(p.days[p.days.length - 1]); render();
 }
-function step(n) { if (mode === 'day') go(cur + n); else goWeek(wcur + n); }
+function setRange(a, b) { rFrom = a < FIRST ? FIRST : a; rTo = b > LAST ? LAST : b; if (rFrom > rTo) [rFrom, rTo] = [rTo, rFrom]; mode = 'range'; cur = D.order.indexOf(rTo); render(); }
+function step(n) {
+  if (mode === 'day') return go(cur + n);
+  if (mode !== 'range') return goP(mode, pidx(mode) + n);
+  const keys = rangeKeys(), len = keys.length;
+  let a = addDays(keys[0], n * len), b = addDays(keys[len - 1], n * len);
+  if (b > LAST) { b = LAST; a = addDays(b, 1 - len); }
+  if (a < FIRST) { a = FIRST; b = addDays(a, len - 1); }
+  setRange(a, b);
+}
 
 function render() {
   const isDay = mode === 'day';
   for (const b of document.querySelectorAll('#modes button')) b.classList.toggle('on', b.dataset.m === mode);
-  document.getElementById('daycard').hidden = !isDay;
-  document.getElementById('logcard').hidden = !isDay;
-  document.getElementById('weekcard').hidden = isDay;
-  let obj;
+  document.getElementById('rangebar').hidden = mode !== 'range';
+  let obj, keys, title, hash, note = '', atStart, atEnd;
   if (isDay) {
-    const key = D.order[cur]; obj = D.days[key];
-    history.replaceState(null, '', '#' + key);
-    document.getElementById('title').textContent = key === D.today ? 'Today, ' + dayName(key) : dayName(key);
-    document.getElementById('prev').disabled = cur === 0;
-    document.getElementById('next').disabled = cur === D.order.length - 1;
-    legend(obj, 'legend'); timeline(obj); hours(obj); logTable(obj);
+    const key = D.order[cur]; obj = D.days[key]; keys = [key];
+    title = key === D.today ? 'Today, ' + dayName(key) : dayName(key); hash = key;
+    atStart = cur === 0; atEnd = cur === D.order.length - 1;
+  } else if (mode === 'range') {
+    keys = rangeKeys(); obj = merge(keys);
+    title = keys.length > 1 ? `${shortDay(keys[0])} to ${shortDay(keys[keys.length - 1])} ${keys[keys.length - 1].slice(0, 4)}` : dayName(keys[0]);
+    hash = `r${keys[0]}_${keys[keys.length - 1]}`;
+    atStart = keys[0] === FIRST; atEnd = keys[keys.length - 1] === LAST;
+    document.getElementById('rfrom').value = keys[0]; document.getElementById('rto').value = keys[keys.length - 1];
   } else {
-    const key = D.worder[wcur]; obj = D.weeks[key];
-    history.replaceState(null, '', '#w' + key);
-    document.getElementById('title').textContent = weekName(key);
-    document.getElementById('prev').disabled = wcur === 0;
-    document.getElementById('next').disabled = wcur === D.worder.length - 1;
-    legend(obj, 'wlegend');
-    columns(document.getElementById('weekdays'), obj.days.map(k => dayItem(k, false)), 3600 * 4);
+    const j = pidx(mode), p = PERIODS[mode][j], [a, b] = periodSpan(mode, p);
+    keys = p.days; obj = merge(keys); title = periodName(mode, p); hash = mode[0] + p.key;
+    note = b > D.today ? 'so far' : a < FIRST ? `tracking began ${shortDay(FIRST)}` : '';
+    atStart = j === 0; atEnd = j === PERIODS[mode].length - 1;
   }
-  tiles(obj, isDay, isDay ? D.order[cur] : D.worder[wcur]); cats(obj); clients(obj); meetings(obj, isDay); apps(obj); sites(obj); trend();
+  history.replaceState(null, '', '#' + hash);
+  document.getElementById('title').textContent = title;
+  document.getElementById('prev').disabled = atStart;
+  document.getElementById('next').disabled = atEnd;
+  document.getElementById('daycard').hidden = !isDay;
+  document.getElementById('logcard').hidden = !isDay || !obj.segs;
+  document.getElementById('weekcard').hidden = isDay;
+  if (isDay) { legend(obj, 'legend'); timeline(obj); hours(obj); logTable(obj); }
+  else { legend(obj, 'wlegend'); perDay(keys); }
+  tiles(obj, isDay, note); salesCard(obj); focusCard(keys, isDay); cats(obj); clients(obj); meetings(obj, isDay); apps(obj); sites(obj); trend();
+  shown = keys;
 }
+let shown = [];
 
 const gen = new Date(D.generated * 1000);
 document.getElementById('when').textContent = `Updated ${pad(gen.getHours())}:${pad(gen.getMinutes())} (DK ${DKF.format(gen)})`;
 document.getElementById('prev').onclick = () => step(-1);
 document.getElementById('next').onclick = () => step(1);
-document.getElementById('today').onclick = () => { if (mode === 'day') go(D.order.length - 1); else goWeek(D.worder.length - 1); };
-for (const b of document.querySelectorAll('#modes button')) b.onclick = () => { mode = b.dataset.m; render(); };
+document.getElementById('today').onclick = () => {
+  if (mode === 'day') go(D.order.length - 1);
+  else if (mode === 'range') { const n = rangeKeys().length; setRange(addDays(LAST, 1 - n), LAST); }
+  else goP(mode, PERIODS[mode].length - 1);
+};
+function setMode(m) { if (m === 'range' && mode !== 'range') { const n = Math.min(30, cur + 1); rTo = D.order[cur]; rFrom = D.order[cur + 1 - n]; } mode = m; render(); }
+for (const b of document.querySelectorAll('#modes button')) b.onclick = () => setMode(b.dataset.m);
+for (const id of ['rfrom', 'rto']) document.getElementById(id).onchange = () => {
+  const a = document.getElementById('rfrom').value, b = document.getElementById('rto').value;
+  if (a && b) setRange(a, b);
+};
+for (const c of document.querySelectorAll('.chip')) c.onclick = () => {
+  const r = c.dataset.r;
+  if (r === 'all') setRange(FIRST, LAST);
+  else if (r === 'year') setRange(LAST.slice(0, 4) + '-01-01', LAST);
+  else setRange(addDays(LAST, 1 - +r), LAST);
+};
 document.getElementById('short').onchange = () => logTable(D.days[D.order[cur]]);
 let resizeTimer; addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(render, 150); });
 document.addEventListener('keydown', e => {
   if (e.target.closest && e.target.closest('input')) return;
   if (e.key === 'ArrowLeft') step(-1); if (e.key === 'ArrowRight') step(1);
-  if (e.key === 'd' || e.key === 'D') { mode = 'day'; render(); } if (e.key === 'w' || e.key === 'W') { mode = 'week'; render(); }
+  const m = {d: 'day', w: 'week', m: 'month', q: 'quarter', r: 'range'}[e.key.toLowerCase()];
+  if (m && !e.metaKey && !e.ctrlKey && !e.altKey) setMode(m);
 });
 const tip = document.getElementById('tip');
 document.addEventListener('mousemove', ev => {
   const t = ev.target.closest && ev.target.closest('[data-tip]');
-  if (!t) { tip.hidden = true; return; }
+  if (!t || !t.dataset.tip) { tip.hidden = true; return; }
   tip.textContent = t.dataset.tip; tip.hidden = false;
   const r = tip.getBoundingClientRect();
   let x = ev.clientX + 14, y = ev.clientY + 14;
@@ -2027,8 +2542,8 @@ document.addEventListener('mousemove', ev => {
   if (y + r.height > innerHeight - 8) y = ev.clientY - r.height - 14;
   tip.style.left = x + 'px'; tip.style.top = y + 'px';
 });
-// The tracker rebuilds this file every 5 minutes; reload while looking at today or this week.
-setTimeout(() => { if ((mode === 'day' && D.order[cur] === D.today) || (mode === 'week' && wcur === D.worder.length - 1)) location.reload(); }, 300000);
+// The tracker rebuilds this file every 5 minutes; reload while the view includes today.
+setTimeout(() => { if (shown.includes(D.today)) location.reload(); }, 300000);
 render();
 </script>
 </body></html>
@@ -2046,6 +2561,9 @@ def main() -> None:
     r.add_argument("--top", type=int, default=15)
     r.add_argument("--pages", action="store_true", help="list the top pages under each site, client and app")
     r.add_argument("--week", action="store_true", help="the whole week (Monday-Sunday) that --date falls in")
+    r.add_argument("--month", action="store_true", help="the whole month that --date falls in")
+    r.add_argument("--quarter", action="store_true", help="the whole quarter that --date falls in")
+    r.add_argument("--from", dest="since", default=None, help="YYYY-MM-DD: every day from here to --date")
     p = sub.add_parser("page", help="rebuild the HTML page")
     p.add_argument("--open", action="store_true")
     sub.add_parser("status")
@@ -2076,12 +2594,19 @@ def main() -> None:
         if args.cmd == "report":
             raw = (args.date or "today").lower()
             end = logical_today() - timedelta(days=1) if raw == "yesterday" else logical_today() if raw == "today" else date.fromisoformat(raw)
-            ndays = max(1, args.days)
+            start = end - timedelta(days=max(1, args.days) - 1)
             if args.week:
-                monday = end - timedelta(days=end.weekday())
-                end = min(monday + timedelta(days=6), logical_today())
-                ndays = (end - monday).days + 1
-            report(con, cats, end, ndays, args.top, args.pages)
+                start = end - timedelta(days=end.weekday())
+                end = start + timedelta(days=6)
+            elif args.month or args.quarter:
+                m0 = end.month if args.month else (end.month - 1) // 3 * 3 + 1
+                start = date(end.year, m0, 1)
+                m1 = m0 + (1 if args.month else 3)
+                end = (date(end.year + 1, 1, 1) if m1 > 12 else date(end.year, m1, 1)) - timedelta(days=1)
+            elif args.since:
+                start = date.fromisoformat(args.since)
+            start, end = max(start, first_day(con) or start), min(end, logical_today())
+            report(con, cats, start, max(start, end), args.top, args.pages)
         elif args.cmd == "page":
             path = build_page(con, cats)
             print(path)

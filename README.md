@@ -2,7 +2,8 @@
 
 See where your day actually goes. A free Mac app that notes which app, web page and window you work in
 every five seconds, and shows your day: time per category and per client, real meeting time (counted from
-the microphone), and the week. Everything stays on your Mac.
+the microphone), sales against client work, how often you switch, and any week, month, quarter or date range.
+Everything stays on your Mac.
 
 **Install:** `curl -fsSL https://rmmarketingmcc.github.io/rm-activity/install.sh | bash`
 (macOS 13+, Apple's Command Line Tools). Page and live demo: https://rmmarketingmcc.github.io/rm-activity/

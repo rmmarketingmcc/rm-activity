@@ -6,8 +6,8 @@
 set -euo pipefail
 
 # release.sh pins these: this script only installs the exact zip it was released with.
-VERSION="1.0.4"
-SHA256="f4cac3491093884c23b5cc1f7c7a521b993c8f97bf1fc96a1c3daaa4cff3ab00"
+VERSION="1.1"
+SHA256="2d3cb3a046c3b4563b5c4381918cbf5bf3c86d9a59fa19ed4fd0d15aba2e1805"
 URL="${RM_ACTIVITY_ZIP:-https://github.com/rmmarketingmcc/rm-activity/releases/download/v$VERSION/RM-Activity.zip}"
 ID="dk.rmmarketing.rm-activity"
 DEST="$HOME/Applications"
